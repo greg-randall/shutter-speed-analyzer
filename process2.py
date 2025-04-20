@@ -6,11 +6,18 @@ import argparse
 import matplotlib.pyplot as plt
 from datetime import datetime
 
-def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, output_visualization=True):
+def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, output_visualization=True, debug=False):
     # Create output folder with timestamp
     timestamp = int(time.time())
     output_dir = f"shutter_test_{timestamp}"
     os.makedirs(output_dir, exist_ok=True)
+    
+    # Create debug subfolder if debug mode is enabled
+    debug_dir = None
+    if debug:
+        debug_dir = os.path.join(output_dir, "debug_frames")
+        os.makedirs(debug_dir, exist_ok=True)
+        print(f"Debug mode enabled: Saving thresholded frames to {debug_dir}")
     
     # Parse region of interest
     x1, y1, x2, y2 = roi
@@ -68,6 +75,36 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, outpu
             # Calculate the average brightness in the ROI
             avg_brightness = np.mean(gray)
             brightness_values.append(avg_brightness)
+            
+            # Save debug frames if debug mode is enabled
+            if debug:
+                # Create a thresholded binary image
+                _, thresholded = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
+                
+                # Convert back to BGR for visualization
+                thresholded_color = cv2.cvtColor(thresholded, cv2.COLOR_GRAY2BGR)
+                
+                # Draw the ROI rectangle on the original frame
+                debug_frame = frame.copy()
+                cv2.rectangle(debug_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                
+                # Add brightness text
+                cv2.putText(
+                    debug_frame, 
+                    f"Brightness: {avg_brightness:.1f}", 
+                    (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 
+                    1, 
+                    (0, 255, 0), 
+                    2
+                )
+                
+                # Create a side-by-side comparison
+                comparison = np.hstack((debug_frame, thresholded_color))
+                
+                # Save the debug frame
+                debug_path = os.path.join(debug_dir, f"frame_{frame_count:06d}_{frame_time_ms:.1f}ms.jpg")
+                cv2.imwrite(debug_path, comparison)
             
             # If brightness exceeds threshold, save the frame
             if avg_brightness > threshold:
@@ -237,6 +274,8 @@ def main():
                         help='Maximum duration to analyze in seconds')
     parser.add_argument('--no-plot', action='store_true',
                         help='Skip generating visualization plots')
+    parser.add_argument('--debug', action='store_true',
+                        help='Enable debug mode to save thresholded frames')
     
     args = parser.parse_args()
     
@@ -245,7 +284,8 @@ def main():
         args.roi, 
         args.threshold,
         max_duration_seconds=args.max_duration,
-        output_visualization=not args.no_plot
+        output_visualization=not args.no_plot,
+        debug=args.debug
     )
 
 if __name__ == "__main__":
