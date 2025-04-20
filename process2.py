@@ -84,9 +84,15 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, outpu
                 # Convert back to BGR for visualization
                 thresholded_color = cv2.cvtColor(thresholded, cv2.COLOR_GRAY2BGR)
                 
-                # Draw the ROI rectangle on the original frame
+                # Create a full-size thresholded image (same size as original frame)
+                full_thresholded = np.zeros_like(frame)
+                # Place the thresholded ROI in the correct position
+                full_thresholded[y1:y2, x1:x2] = thresholded_color
+                
+                # Draw the ROI rectangle on both images
                 debug_frame = frame.copy()
                 cv2.rectangle(debug_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.rectangle(full_thresholded, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 
                 # Add brightness text
                 cv2.putText(
@@ -100,7 +106,7 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, outpu
                 )
                 
                 # Create a side-by-side comparison
-                comparison = np.hstack((debug_frame, thresholded_color))
+                comparison = np.hstack((debug_frame, full_thresholded))
                 
                 # Save the debug frame
                 debug_path = os.path.join(debug_dir, f"frame_{frame_count:06d}_{frame_time_ms:.1f}ms.jpg")
