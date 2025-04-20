@@ -1,0 +1,62 @@
+Shutter Speed Analysis Report
+Generated: 2025-04-20 18:04:55
+
+Video: in.mp4
+FPS: 29.89484841573329 (each frame is 33.45ms)
+Total frames analyzed: 2603
+ROI: (371, 281) to (877, 556)
+Brightness threshold: 44 (pixels above this value are considered 'white')
+White percentage threshold: 0.01%
+Analysis start time: 33.0 seconds
+Analysis end time: 120.0 seconds
+
+Detected 5 shutter events:
+
+Event 1:
+  Frames: 1111 to 1122
+  Video time: 37163.59ms to 37531.55ms
+  Video duration: 401.41ms
+  Max brightness: 12.2
+  Event folder: shutter-event-001
+  Real-world duration: 50.00ms
+  Approximate shutter speed: 1/20 sec
+
+Event 2:
+  Frames: 1761 to 1772
+  Video time: 58906.47ms to 59274.43ms
+  Video duration: 401.41ms
+  Max brightness: 12.3
+  Event folder: shutter-event-002
+  Real-world duration: 50.00ms
+  Approximate shutter speed: 1/20 sec
+
+Event 3:
+  Frames: 2398 to 2409
+  Video time: 80214.49ms to 80582.45ms
+  Video duration: 401.41ms
+  Max brightness: 12.1
+  Event folder: shutter-event-003
+  Real-world duration: 50.00ms
+  Approximate shutter speed: 1/20 sec
+
+Event 4:
+  Frames: 2932 to 2943
+  Video time: 98077.10ms to 98445.06ms
+  Video duration: 401.41ms
+  Max brightness: 12.1
+  Event folder: shutter-event-004
+  Real-world duration: 50.00ms
+  Approximate shutter speed: 1/20 sec
+
+Event 5:
+  Frames: 3502 to 3513
+  Video time: 117143.93ms to 117511.89ms
+  Video duration: 401.41ms
+  Max brightness: 12.2
+  Event folder: shutter-event-005
+  Real-world duration: 50.00ms
+  Approximate shutter speed: 1/20 sec
+
+Average shutter duration (video time): 401.41ms ± 0.00ms
+Average shutter duration (real-world): 50.00ms ± 0.00ms
+Approximate average shutter speed: 1/20 sec
