@@ -240,25 +240,11 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                 debug_path = os.path.join(debug_dir, f"frame_{frame_count:06d}_{frame_time_ms:.1f}ms.jpg")
                 cv2.imwrite(debug_path, comparison)
             
-            # If white percentage exceeds threshold, save the frame
+            # If white percentage exceeds threshold, just track it
+            # (frames will be saved in event-specific folders later)
             if white_percentage > white_percentage_threshold:
-                # Draw the ROI rectangle on the frame
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                
-                # Add white percentage text
-                cv2.putText(
-                    frame, 
-                    f"White %: {white_percentage:.1f}%", 
-                    (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 
-                    1, 
-                    (0, 255, 0), 
-                    2
-                )
-                
-                # Save the frame
-                output_path = os.path.join(output_dir, f"frame_{frame_count:06d}_{frame_time_ms:.1f}ms.jpg")
-                cv2.imwrite(output_path, frame)
+                # We don't save to root folder anymore to avoid duplication
+                pass
         else:
             print(f"Warning: ROI coordinates ({x1}, {y1}, {x2}, {y2}) out of frame bounds ({frame_width}x{frame_height})")
             brightness_values.append(0)
