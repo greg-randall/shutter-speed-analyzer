@@ -15,6 +15,45 @@ from tqdm import tqdm
 import colorama
 from colorama import Fore, Style
 
+def reliable_frame_seek(cap, target_frame):
+    """
+    Reliably seek to a specific frame in a video.
+    If direct seeking fails, falls back to sequential reading.
+    
+    Args:
+        cap: OpenCV VideoCapture object
+        target_frame: Frame number to seek to
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    # Try direct seeking first
+    cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+    
+    # Verify we're at the expected position
+    current_pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+    
+    # If we're at the right position, we're done
+    if current_pos == target_frame:
+        return True
+    
+    print(f"{Fore.YELLOW}Warning: Direct frame seeking failed. Requested frame {target_frame}, got {current_pos}. Falling back to sequential reading.{Style.RESET_ALL}")
+    
+    # If direct seeking failed and we're past the target, reset to beginning
+    if current_pos > target_frame:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        current_pos = 0
+    
+    # Read frames sequentially until we reach the target
+    frames_to_skip = target_frame - current_pos
+    for _ in range(frames_to_skip):
+        ret = cap.read()[0]
+        if not ret:
+            print(f"{Fore.RED}Error: Failed to reach target frame {target_frame} via sequential reading.{Style.RESET_ALL}")
+            return False
+    
+    return True
+
 def get_video_metadata(video_path):
     """Extract metadata from video file using ffprobe"""
     try:
@@ -182,7 +221,9 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
     if start_time_seconds is not None:
         start_frame = int(start_time_seconds * fps)
         # Seek to the start position
-        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+        if not reliable_frame_seek(cap, start_frame):
+            print(f"{Fore.RED}Error: Could not seek to start frame {start_frame}.{Style.RESET_ALL}")
+            return
     
     end_frame = total_frames
     if end_time_seconds is not None:
@@ -346,7 +387,9 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
             end_frame_with_context = min(event['end_frame'] + 10, total_frames - 1)
             
             # Set position to start frame with context
-            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame_with_context)
+            if not reliable_frame_seek(cap, start_frame_with_context):
+                print(f"{Fore.RED}Error: Could not seek to frame {start_frame_with_context} for event {i+1}.{Style.RESET_ALL}")
+                continue  # Skip this event but continue with others
             
             # Process frames for this event with a mini progress bar
             frames_to_process = end_frame_with_context - start_frame_with_context + 1
