@@ -259,6 +259,225 @@ def print_video_info(video_path, container_fps, ms_per_frame, real_fps, real_ms_
     print(f"{Fore.YELLOW}{'='*60}{Style.RESET_ALL}\n")
 
 
+def create_event_visualization(frame, roi, white_percentage, is_event_frame):
+    """
+    Create a visualization frame for an event with appropriate markings.
+    
+    Args:
+        frame: Original video frame
+        roi: Region of interest as (x1, y1, x2, y2)
+        white_percentage: Calculated white pixel percentage
+        is_event_frame: Whether this frame is part of a shutter event
+        
+    Returns:
+        Marked frame with visualizations
+    """
+    x1, y1, x2, y2 = roi
+    
+    # Draw the ROI rectangle on the frame
+    marked_frame = frame.copy()
+    cv2.rectangle(marked_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+    # Add white percentage text with three decimal places
+    cv2.putText(
+        marked_frame, 
+        f"White %: {white_percentage:.3f}%", 
+        (10, 30), 
+        cv2.FONT_HERSHEY_SIMPLEX, 
+        1, 
+        (0, 255, 0), 
+        2
+    )
+
+    if is_event_frame:
+        # Add brightness info to the event frame label
+        cv2.putText(
+            marked_frame, 
+            f"SHUTTER EVENT (BRIGHTNESS: {white_percentage:.3f}%)", 
+            (10, 70), 
+            cv2.FONT_HERSHEY_SIMPLEX, 
+            0.8, 
+            (0, 0, 255), 
+            2
+        )
+        # Add a red rectangle around the edge of the frame
+        h, w = marked_frame.shape[:2]
+        cv2.rectangle(marked_frame, (0, 0), (w-1, h-1), (0, 0, 255), 3)
+    
+    return marked_frame
+
+
+def process_shutter_events(video_path, shutter_intervals, roi, threshold, 
+                          white_percentage_threshold, frame_brightness_map, 
+                          container_fps, slowmo_factor, total_frames, output_dir):
+    """
+    Process and save frames for each detected shutter event.
+    
+    Args:
+        video_path: Path to the video file
+        shutter_intervals: List of detected shutter events
+        roi: Region of interest as (x1, y1, x2, y2)
+        threshold: Brightness threshold for binary conversion
+        white_percentage_threshold: Threshold for considering a frame part of a shutter event
+        frame_brightness_map: Dictionary mapping frame indices to brightness values
+        container_fps: Container frame rate
+        slowmo_factor: Slow motion factor
+        total_frames: Total frames in the video
+        output_dir: Directory to save the output
+    """
+    # We need to store all frames to include context frames
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print(f"{Fore.RED}Error: Could not reopen video file {video_path}{Style.RESET_ALL}")
+        return
+    
+    # Process each event
+    for i, event in enumerate(shutter_intervals):
+        # Create folder for this event
+        event_dir = os.path.join(output_dir, f"shutter-event-{i+1:03d}")
+        os.makedirs(event_dir, exist_ok=True)
+        
+        # Calculate frame range with context (5 frames before and 10 frames after)
+        start_frame_with_context = max(event['start_frame'] - 5, 0)
+        end_frame_with_context = min(event['end_frame'] + 10, total_frames - 1)
+        
+        # Set position to start frame with context
+        if not reliable_frame_seek(cap, start_frame_with_context):
+            print(f"{Fore.RED}Error: Could not seek to frame {start_frame_with_context} for event {i+1}.{Style.RESET_ALL}")
+            continue  # Skip this event but continue with others
+        
+        # Process frames for this event with a mini progress bar
+        frames_to_process = end_frame_with_context - start_frame_with_context + 1
+        with tqdm(total=frames_to_process, desc=f"Event {i+1}", unit="frame", ncols=80, 
+                  bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}") as event_pbar:
+            for frame_idx in range(start_frame_with_context, end_frame_with_context + 1):
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                
+                # Calculate frame timestamps consistently
+                video_time_ms, real_time_ms = calculate_frame_times(frame_idx, container_fps, slowmo_factor)
+                
+                # Process the ROI and calculate brightness
+                if frame.shape[0] >= roi[3] and frame.shape[1] >= roi[2]:
+                    white_percentage, thresholded, roi_frame = process_roi_frame(frame, roi, threshold)
+                    
+                    # Verify brightness against stored value from first pass
+                    if frame_idx in frame_brightness_map:
+                        stored_brightness = frame_brightness_map[frame_idx]
+                        if abs(white_percentage - stored_brightness) > 1.0:  # Allow small differences
+                            # If this is a critical frame (event frame), try to recover the brightness
+                            expected_event_frame = event['start_frame'] <= frame_idx <= event['end_frame']
+                            if expected_event_frame and white_percentage < 0.5:
+                                print(f"{Fore.RED}Recovering brightness for event frame {frame_idx}. "
+                                      f"Using first pass value: {stored_brightness:.3f}% instead of {white_percentage:.3f}%{Style.RESET_ALL}")
+                                # Use the stored brightness from first pass for this frame
+                                white_percentage = stored_brightness
+                            else:
+                                print(f"{Fore.YELLOW}Warning: Frame {frame_idx} brightness mismatch. "
+                                      f"First pass: {stored_brightness:.3f}%, Second pass: {white_percentage:.3f}%{Style.RESET_ALL}")
+                    
+                    # Determine if this is an event frame based on the first pass analysis
+                    is_event_frame = event['start_frame'] <= frame_idx <= event['end_frame']
+                    actual_event_frame = white_percentage > white_percentage_threshold
+                    
+                    # Log any discrepancies for debugging
+                    if is_event_frame != actual_event_frame:
+                        print(f"{Fore.YELLOW}Warning: Frame {frame_idx} index-based classification ({is_event_frame}) " 
+                              f"doesn't match brightness-based classification ({actual_event_frame}). "
+                              f"Brightness: {white_percentage:.3f}%{Style.RESET_ALL}")
+                    
+                    # Create visualization frame
+                    marked_frame = create_event_visualization(frame, roi, white_percentage, is_event_frame)
+                    
+                    # Use a consistent naming pattern that sorts properly but still indicates event vs context
+                    marker = "e" if is_event_frame else "c"
+                    output_path = os.path.join(
+                        event_dir, 
+                        f"frame_{frame_idx:06d}_{marker}_{white_percentage:.1f}pct_{video_time_ms:.1f}ms.jpg"
+                    )
+                    cv2.imwrite(output_path, marked_frame)
+                
+                event_pbar.update(1)
+        
+        # Add event folder path to the event dictionary for reporting
+        event['folder'] = event_dir
+        
+        # Print event summary
+        if real_fps := (container_fps * slowmo_factor if slowmo_factor > 1.0 else None):
+            shutter_speed_denominator = int(1000 / event['real_duration_ms'])
+            print(f"{Fore.GREEN}Event {i+1}: {Style.BRIGHT}Frames {event['start_frame']} to {event['end_frame']} "
+                  f"{Style.RESET_ALL}(white: {event['max_brightness']:.1f}%, duration: {event['duration_ms']:.1f}ms, "
+                  f"real: {event['real_duration_ms']:.1f}ms, ~1/{shutter_speed_denominator}s)")
+        else:
+            shutter_speed_denominator = int(1000 / event['duration_ms'])
+            print(f"{Fore.GREEN}Event {i+1}: {Style.BRIGHT}Frames {event['start_frame']} to {event['end_frame']} "
+                  f"{Style.RESET_ALL}(white: {event['max_brightness']:.1f}%, duration: {event['duration_ms']:.1f}ms, "
+                  f"~1/{shutter_speed_denominator}s)")
+    
+    cap.release()
+
+
+
+def find_shutter_events(brightness_array, threshold, start_frame, container_fps, slowmo_factor=1.0):
+    """
+    Find and group shutter events based on brightness threshold.
+    
+    Args:
+        brightness_array: Array of brightness values
+        threshold: Threshold for considering a frame part of a shutter event
+        start_frame: Starting frame index of the analysis
+        container_fps: Container frame rate
+        slowmo_factor: Slow motion factor (real_fps / container_fps)
+        
+    Returns:
+        List of dictionaries containing shutter event information
+    """
+    # Find shutter events (frames above threshold)
+    shutter_events = brightness_array > threshold
+    shutter_frames = np.where(shutter_events)[0]
+    
+    # Group consecutive frames into single events
+    shutter_intervals = []
+    if len(shutter_frames) > 0:
+        # Find gaps in consecutive frame sequences
+        gaps = np.where(np.diff(shutter_frames) > 1)[0]
+                
+        # Split into individual events
+        shutter_events_grouped = np.split(shutter_frames, gaps + 1)
+                
+        for event in shutter_events_grouped:
+            if len(event) > 0:
+                # Add start_frame to convert from relative to absolute frame indices
+                start_frame_idx = event[0] + start_frame
+                end_frame_idx = event[-1] + start_frame
+                
+                # Calculate times
+                ms_per_frame = 1000.0 / container_fps
+                start_time_ms, start_real_time_ms = calculate_frame_times(
+                    start_frame_idx, container_fps, slowmo_factor)
+                end_time_ms, end_real_time_ms = calculate_frame_times(
+                    end_frame_idx, container_fps, slowmo_factor)
+                
+                # Calculate durations
+                duration_ms = end_time_ms - start_time_ms + ms_per_frame  # Add one frame duration
+                real_duration_ms = end_real_time_ms - start_real_time_ms + (ms_per_frame / slowmo_factor)
+                        
+                shutter_intervals.append({
+                    "start_frame": start_frame_idx,
+                    "end_frame": end_frame_idx,
+                    "start_time_ms": start_time_ms,
+                    "end_time_ms": end_time_ms,
+                    "duration_ms": duration_ms,
+                    "real_start_time_ms": start_real_time_ms,
+                    "real_end_time_ms": end_real_time_ms,
+                    "real_duration_ms": real_duration_ms,
+                    "max_brightness": np.max(brightness_array[event[0]:event[-1]+1])
+                })
+    
+    return shutter_intervals
+
+
 def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, 
                    start_time_seconds=None, end_time_seconds=None, 
                    output_visualization=True, debug=False, metadata=None, 
@@ -461,116 +680,35 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None,
     
     return output_dir, shutter_intervals
 
-
-def process_shutter_events(video_path, shutter_intervals, roi, threshold, 
-                          white_percentage_threshold, frame_brightness_map, 
-                          container_fps, slowmo_factor, total_frames, output_dir):
+def process_roi_frame(frame, roi, threshold):
     """
-    Process and save frames for each detected shutter event.
+    Process a region of interest in a frame and calculate white pixel percentage.
     
     Args:
-        video_path: Path to the video file
-        shutter_intervals: List of detected shutter events
+        frame: Input video frame
         roi: Region of interest as (x1, y1, x2, y2)
         threshold: Brightness threshold for binary conversion
-        white_percentage_threshold: Threshold for considering a frame part of a shutter event
-        frame_brightness_map: Dictionary mapping frame indices to brightness values
-        container_fps: Container frame rate
-        slowmo_factor: Slow motion factor
-        total_frames: Total frames in the video
-        output_dir: Directory to save the output
+        
+    Returns:
+        Tuple of (white_percentage, thresholded_image, roi_frame)
     """
-    # We need to store all frames to include context frames
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print(f"{Fore.RED}Error: Could not reopen video file {video_path}{Style.RESET_ALL}")
-        return
+    x1, y1, x2, y2 = roi
     
-    # Process each event
-    for i, event in enumerate(shutter_intervals):
-        # Create folder for this event
-        event_dir = os.path.join(output_dir, f"shutter-event-{i+1:03d}")
-        os.makedirs(event_dir, exist_ok=True)
-        
-        # Calculate frame range with context (5 frames before and 10 frames after)
-        start_frame_with_context = max(event['start_frame'] - 5, 0)
-        end_frame_with_context = min(event['end_frame'] + 10, total_frames - 1)
-        
-        # Set position to start frame with context
-        if not reliable_frame_seek(cap, start_frame_with_context):
-            print(f"{Fore.RED}Error: Could not seek to frame {start_frame_with_context} for event {i+1}.{Style.RESET_ALL}")
-            continue  # Skip this event but continue with others
-        
-        # Process frames for this event with a mini progress bar
-        frames_to_process = end_frame_with_context - start_frame_with_context + 1
-        with tqdm(total=frames_to_process, desc=f"Event {i+1}", unit="frame", ncols=80, 
-                  bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}") as event_pbar:
-            for frame_idx in range(start_frame_with_context, end_frame_with_context + 1):
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                
-                # Calculate frame timestamps consistently
-                video_time_ms, real_time_ms = calculate_frame_times(frame_idx, container_fps, slowmo_factor)
-                
-                # Process the ROI and calculate brightness
-                if frame.shape[0] >= roi[3] and frame.shape[1] >= roi[2]:
-                    white_percentage, thresholded, roi_frame = process_roi_frame(frame, roi, threshold)
-                    
-                    # Verify brightness against stored value from first pass
-                    if frame_idx in frame_brightness_map:
-                        stored_brightness = frame_brightness_map[frame_idx]
-                        if abs(white_percentage - stored_brightness) > 1.0:  # Allow small differences
-                            # If this is a critical frame (event frame), try to recover the brightness
-                            expected_event_frame = event['start_frame'] <= frame_idx <= event['end_frame']
-                            if expected_event_frame and white_percentage < 0.5:
-                                print(f"{Fore.RED}Recovering brightness for event frame {frame_idx}. "
-                                      f"Using first pass value: {stored_brightness:.3f}% instead of {white_percentage:.3f}%{Style.RESET_ALL}")
-                                # Use the stored brightness from first pass for this frame
-                                white_percentage = stored_brightness
-                            else:
-                                print(f"{Fore.YELLOW}Warning: Frame {frame_idx} brightness mismatch. "
-                                      f"First pass: {stored_brightness:.3f}%, Second pass: {white_percentage:.3f}%{Style.RESET_ALL}")
-                    
-                    # Determine if this is an event frame based on the first pass analysis
-                    is_event_frame = event['start_frame'] <= frame_idx <= event['end_frame']
-                    actual_event_frame = white_percentage > white_percentage_threshold
-                    
-                    # Log any discrepancies for debugging
-                    if is_event_frame != actual_event_frame:
-                        print(f"{Fore.YELLOW}Warning: Frame {frame_idx} index-based classification ({is_event_frame}) " 
-                              f"doesn't match brightness-based classification ({actual_event_frame}). "
-                              f"Brightness: {white_percentage:.3f}%{Style.RESET_ALL}")
-                    
-                    # Create visualization frame
-                    marked_frame = create_event_visualization(frame, roi, white_percentage, is_event_frame)
-                    
-                    # Use a consistent naming pattern that sorts properly but still indicates event vs context
-                    marker = "e" if is_event_frame else "c"
-                    output_path = os.path.join(
-                        event_dir, 
-                        f"frame_{frame_idx:06d}_{marker}_{white_percentage:.1f}pct_{video_time_ms:.1f}ms.jpg"
-                    )
-                    cv2.imwrite(output_path, marked_frame)
-                
-                event_pbar.update(1)
-        
-        # Add event folder path to the event dictionary for reporting
-        event['folder'] = event_dir
-        
-        # Print event summary
-        if real_fps := (container_fps * slowmo_factor if slowmo_factor > 1.0 else None):
-            shutter_speed_denominator = int(1000 / event['real_duration_ms'])
-            print(f"{Fore.GREEN}Event {i+1}: {Style.BRIGHT}Frames {event['start_frame']} to {event['end_frame']} "
-                  f"{Style.RESET_ALL}(white: {event['max_brightness']:.1f}%, duration: {event['duration_ms']:.1f}ms, "
-                  f"real: {event['real_duration_ms']:.1f}ms, ~1/{shutter_speed_denominator}s)")
-        else:
-            shutter_speed_denominator = int(1000 / event['duration_ms'])
-            print(f"{Fore.GREEN}Event {i+1}: {Style.BRIGHT}Frames {event['start_frame']} to {event['end_frame']} "
-                  f"{Style.RESET_ALL}(white: {event['max_brightness']:.1f}%, duration: {event['duration_ms']:.1f}ms, "
-                  f"~1/{shutter_speed_denominator}s)")
+    # Extract region of interest
+    roi_frame = frame[y1:y2, x1:x2]
     
-    cap.release()
+    # Convert to grayscale
+    gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
+    
+    # Apply thresholding to create binary image
+    _, thresholded = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
+    
+    # Calculate percentage of white pixels (brightness > threshold)
+    white_pixel_count = np.count_nonzero(thresholded)
+    total_pixels = thresholded.size
+    white_percentage = (white_pixel_count / total_pixels) * 100
+    
+    return white_percentage, thresholded, roi_frame
 
 
 def generate_report(output_dir, video_path, fps, ms_per_frame, frame_count, start_frame, 
@@ -799,36 +937,6 @@ def extract_fps_from_filename(video_path, info):
             info['real_fps'] = potential_fps
 
 
-def process_roi_frame(frame, roi, threshold):
-    """
-    Process a region of interest in a frame and calculate white pixel percentage.
-    
-    Args:
-        frame: Input video frame
-        roi: Region of interest as (x1, y1, x2, y2)
-        threshold: Brightness threshold for binary conversion
-        
-    Returns:
-        Tuple of (white_percentage, thresholded_image, roi_frame)
-    """
-    x1, y1, x2, y2 = roi
-    
-    # Extract region of interest
-    roi_frame = frame[y1:y2, x1:x2]
-    
-    # Convert to grayscale
-    gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
-    
-    # Apply thresholding to create binary image
-    _, thresholded = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
-    
-    # Calculate percentage of white pixels (brightness > threshold)
-    white_pixel_count = np.count_nonzero(thresholded)
-    total_pixels = thresholded.size
-    white_percentage = (white_pixel_count / total_pixels) * 100
-    
-    return white_percentage, thresholded, roi_frame
-
 
 def create_debug_frame(frame, roi, white_percentage, thresholded):
     """
@@ -874,111 +982,5 @@ def create_debug_frame(frame, roi, white_percentage, thresholded):
     
     return comparison
 
-
-def find_shutter_events(brightness_array, threshold, start_frame, container_fps, slowmo_factor=1.0):
-    """
-    Find and group shutter events based on brightness threshold.
-    
-    Args:
-        brightness_array: Array of brightness values
-        threshold: Threshold for considering a frame part of a shutter event
-        start_frame: Starting frame index of the analysis
-        container_fps: Container frame rate
-        slowmo_factor: Slow motion factor (real_fps / container_fps)
-        
-    Returns:
-        List of dictionaries containing shutter event information
-    """
-    # Find shutter events (frames above threshold)
-    shutter_events = brightness_array > threshold
-    shutter_frames = np.where(shutter_events)[0]
-    
-    # Group consecutive frames into single events
-    shutter_intervals = []
-    if len(shutter_frames) > 0:
-        # Find gaps in consecutive frame sequences
-        gaps = np.where(np.diff(shutter_frames) > 1)[0]
-                
-        # Split into individual events
-        shutter_events_grouped = np.split(shutter_frames, gaps + 1)
-                
-        for event in shutter_events_grouped:
-            if len(event) > 0:
-                # Add start_frame to convert from relative to absolute frame indices
-                start_frame_idx = event[0] + start_frame
-                end_frame_idx = event[-1] + start_frame
-                
-                # Calculate times
-                ms_per_frame = 1000.0 / container_fps
-                start_time_ms, start_real_time_ms = calculate_frame_times(
-                    start_frame_idx, container_fps, slowmo_factor)
-                end_time_ms, end_real_time_ms = calculate_frame_times(
-                    end_frame_idx, container_fps, slowmo_factor)
-                
-                # Calculate durations
-                duration_ms = end_time_ms - start_time_ms + ms_per_frame  # Add one frame duration
-                real_duration_ms = end_real_time_ms - start_real_time_ms + (ms_per_frame / slowmo_factor)
-                        
-                shutter_intervals.append({
-                    "start_frame": start_frame_idx,
-                    "end_frame": end_frame_idx,
-                    "start_time_ms": start_time_ms,
-                    "end_time_ms": end_time_ms,
-                    "duration_ms": duration_ms,
-                    "real_start_time_ms": start_real_time_ms,
-                    "real_end_time_ms": end_real_time_ms,
-                    "real_duration_ms": real_duration_ms,
-                    "max_brightness": np.max(brightness_array[event[0]:event[-1]+1])
-                })
-    
-    return shutter_intervals
-
-
-def create_event_visualization(frame, roi, white_percentage, is_event_frame):
-    """
-    Create a visualization frame for an event with appropriate markings.
-    
-    Args:
-        frame: Original video frame
-        roi: Region of interest as (x1, y1, x2, y2)
-        white_percentage: Calculated white pixel percentage
-        is_event_frame: Whether this frame is part of a shutter event
-        
-    Returns:
-        Marked frame with visualizations
-    """
-    x1, y1, x2, y2 = roi
-    
-    # Draw the ROI rectangle on the frame
-    marked_frame = frame.copy()
-    cv2.rectangle(marked_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-    # Add white percentage text with three decimal places
-    cv2.putText(
-        marked_frame, 
-        f"White %: {white_percentage:.3f}%", 
-        (10, 30), 
-        cv2.FONT_HERSHEY_SIMPLEX, 
-        1, 
-        (0, 255, 0), 
-        2
-    )
-
-    if is_event_frame:
-        # Add brightness info to the event frame label
-        cv2.putText(
-            marked_frame, 
-            f"SHUTTER EVENT (BRIGHTNESS: {white_percentage:.3f}%)", 
-            (10, 70), 
-            cv2.FONT_HERSHEY_SIMPLEX, 
-            0.8, 
-            (0, 0, 255), 
-            2
-        )
-        # Add a red rectangle around the edge of the frame
-        h, w = marked_frame.shape[:2]
-        cv2.rectangle(marked_frame, (0, 0), (w-1, h-1), (0, 0, 255), 3)
-    
-    return marked_frame
 
 
