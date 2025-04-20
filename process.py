@@ -11,6 +11,9 @@ from datetime import datetime
 import subprocess
 import json
 import re
+from tqdm import tqdm
+import colorama
+from colorama import Fore, Style
 
 def get_video_metadata(video_path):
     """Extract metadata from video file using ffprobe"""
@@ -97,6 +100,9 @@ def get_video_metadata(video_path):
         return None
 
 def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start_time_seconds=None, end_time_seconds=None, output_visualization=True, debug=False, metadata=None, white_percentage_threshold=10.0):
+    # Initialize colorama
+    colorama.init()
+    
     # Create output folder with timestamp
     timestamp = int(time.time())
     output_dir = f"shutter_test_{timestamp}"
@@ -107,7 +113,7 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
     if debug:
         debug_dir = os.path.join(output_dir, "debug_frames")
         os.makedirs(debug_dir, exist_ok=True)
-        print(f"Debug mode enabled: Saving thresholded frames to {debug_dir}")
+        print(f"{Fore.CYAN}Debug mode enabled: {Style.BRIGHT}Saving thresholded frames to {debug_dir}{Style.RESET_ALL}")
     
     # Parse region of interest
     x1, y1, x2, y2 = roi
@@ -119,7 +125,7 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
     # Open video file
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        print(f"Error: Could not open video file {video_path}")
+        print(f"{Fore.RED}Error: Could not open video file {video_path}{Style.RESET_ALL}")
         return
     
     # Get video properties
@@ -134,12 +140,12 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
     slowmo_factor = 1.0
     
     if metadata:
-        print(f"Video metadata: {metadata}")
+        print(f"{Fore.CYAN}Video metadata: {metadata}{Style.RESET_ALL}")
         if metadata.get('real_fps') is not None:
             real_fps = metadata['real_fps']
             slowmo_factor = real_fps / container_fps
-            print(f"Detected slow motion video: {real_fps}fps captured, played at {container_fps}fps")
-            print(f"Slow motion factor: {slowmo_factor:.2f}x")
+            print(f"{Fore.GREEN}Detected slow motion video: {Style.BRIGHT}{real_fps}fps captured, played at {container_fps}fps{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}Slow motion factor: {Style.BRIGHT}{slowmo_factor:.2f}x{Style.RESET_ALL}")
     
     # Time per frame in milliseconds (using container FPS for frame timing)
     ms_per_frame = 1000.0 / container_fps
@@ -147,26 +153,29 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
     # Real-world time per frame (adjusted for slow motion if detected)
     real_ms_per_frame = ms_per_frame / slowmo_factor if slowmo_factor > 1.0 else ms_per_frame
     
-    print(f"Video container FPS: {container_fps} (each frame is {ms_per_frame:.2f}ms)")
+    # Print video information in a formatted way
+    print(f"\n{Fore.YELLOW}{'='*60}{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}Video Analysis Configuration{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}{'='*60}{Style.RESET_ALL}")
+    print(f"{Fore.WHITE}Video file: {Style.BRIGHT}{os.path.basename(video_path)}{Style.RESET_ALL}")
+    print(f"{Fore.WHITE}Container FPS: {Style.BRIGHT}{container_fps:.2f} {Style.RESET_ALL}(each frame is {ms_per_frame:.2f}ms)")
     if real_fps:
-        print(f"Real capture FPS: {real_fps} (each frame represents {real_ms_per_frame:.2f}ms in real time)")
-    print(f"Video resolution: {frame_width}x{frame_height}")
-    print(f"ROI: ({x1}, {y1}) to ({x2}, {y2})")
-    print(f"Brightness threshold: {threshold}")
+        print(f"{Fore.WHITE}Real capture FPS: {Style.BRIGHT}{real_fps:.2f} {Style.RESET_ALL}(each frame represents {real_ms_per_frame:.2f}ms in real time)")
+    print(f"{Fore.WHITE}Video resolution: {Style.BRIGHT}{frame_width}x{frame_height}{Style.RESET_ALL}")
+    print(f"{Fore.WHITE}ROI: {Style.BRIGHT}({x1}, {y1}) to ({x2}, {y2}){Style.RESET_ALL}")
+    print(f"{Fore.WHITE}Brightness threshold: {Style.BRIGHT}{threshold}{Style.RESET_ALL}")
+    print(f"{Fore.WHITE}White percentage threshold: {Style.BRIGHT}{white_percentage_threshold}%{Style.RESET_ALL}")
     
     # Print analysis time range
     if start_time_seconds is not None:
-        print(f"Will start analysis at {start_time_seconds} seconds")
+        print(f"{Fore.WHITE}Start time: {Style.BRIGHT}{start_time_seconds} seconds{Style.RESET_ALL}")
     if end_time_seconds is not None:
-        print(f"Will end analysis at {end_time_seconds} seconds")
+        print(f"{Fore.WHITE}End time: {Style.BRIGHT}{end_time_seconds} seconds{Style.RESET_ALL}")
     if max_duration_seconds is not None:
-        print(f"Will analyze up to {max_duration_seconds} seconds of video")
-        # Calculate the frame number where we'll stop
-        max_frames = int(max_duration_seconds * fps)
-        if max_frames < total_frames:
-            total_frames = max_frames
+        print(f"{Fore.WHITE}Maximum duration: {Style.BRIGHT}{max_duration_seconds} seconds{Style.RESET_ALL}")
     if start_time_seconds is None and end_time_seconds is None and max_duration_seconds is None:
-        print("Will analyze the entire video")
+        print(f"{Fore.WHITE}Analyzing: {Style.BRIGHT}Entire video{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}{'='*60}{Style.RESET_ALL}\n")
     
     # Calculate frame numbers for start and end times
     start_frame = 0
@@ -183,101 +192,93 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
     
     # Calculate total frames to process
     total_frames_to_process = end_frame - start_frame
-    print(f"Will process {total_frames_to_process} frames (from frame {start_frame} to {end_frame})")
+    print(f"{Fore.CYAN}Processing {Style.BRIGHT}{total_frames_to_process} frames{Style.RESET_ALL} (from frame {start_frame} to {end_frame})")
     
     frame_count = start_frame
     brightness_values = []
     frame_timestamps = []
     
-    # Process the video frame by frame
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-        
-        # Calculate frame timestamp in milliseconds
-        frame_time_ms = frame_count * ms_per_frame
-        frame_timestamps.append(frame_time_ms)
-        
-        # Also track real-world time if slow motion is detected
-        real_time_ms = frame_count * real_ms_per_frame
-        
-        # Extract region of interest
-        if y2 <= frame.shape[0] and x2 <= frame.shape[1]:
-            roi_frame = frame[y1:y2, x1:x2]
+    # Process the video frame by frame with tqdm progress bar
+    with tqdm(total=total_frames_to_process, desc="Analyzing frames", unit="frame", ncols=100, 
+              bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]") as pbar:
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
             
-            # Convert to grayscale
-            gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
+            # Calculate frame timestamp in milliseconds
+            frame_time_ms = frame_count * ms_per_frame
+            frame_timestamps.append(frame_time_ms)
             
-            # Apply thresholding to create binary image
-            _, thresholded = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
+            # Also track real-world time if slow motion is detected
+            real_time_ms = frame_count * real_ms_per_frame
             
-            # Calculate percentage of white pixels (brightness > threshold)
-            white_pixel_count = np.count_nonzero(thresholded)
-            total_pixels = thresholded.size
-            white_percentage = (white_pixel_count / total_pixels) * 100
-            
-            # Store the white percentage
-            brightness_values.append(white_percentage)
-            
-            # Save debug frames if debug mode is enabled
-            if debug:
-                # Convert thresholded image back to BGR for visualization
-                thresholded_color = cv2.cvtColor(thresholded, cv2.COLOR_GRAY2BGR)
+            # Extract region of interest
+            if y2 <= frame.shape[0] and x2 <= frame.shape[1]:
+                roi_frame = frame[y1:y2, x1:x2]
                 
-                # Create a full-size thresholded image (same size as original frame)
-                full_thresholded = np.zeros_like(frame)
-                # Place the thresholded ROI in the correct position
-                full_thresholded[y1:y2, x1:x2] = thresholded_color
+                # Convert to grayscale
+                gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
                 
-                # Draw the ROI rectangle on both images
-                debug_frame = frame.copy()
-                cv2.rectangle(debug_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.rectangle(full_thresholded, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                # Apply thresholding to create binary image
+                _, thresholded = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
                 
-                # Add white percentage text with three decimal places
-                cv2.putText(
-                    debug_frame, 
-                    f"White %: {white_percentage:.3f}%", 
-                    (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 
-                    1, 
-                    (0, 255, 0), 
-                    2
-                )
+                # Calculate percentage of white pixels (brightness > threshold)
+                white_pixel_count = np.count_nonzero(thresholded)
+                total_pixels = thresholded.size
+                white_percentage = (white_pixel_count / total_pixels) * 100
                 
-                # Create a side-by-side comparison
-                comparison = np.hstack((debug_frame, full_thresholded))
+                # Store the white percentage
+                brightness_values.append(white_percentage)
                 
-                # Save the debug frame
-                debug_path = os.path.join(debug_dir, f"frame_{frame_count:06d}_{frame_time_ms:.1f}ms.jpg")
-                cv2.imwrite(debug_path, comparison)
+                # Save debug frames if debug mode is enabled
+                if debug:
+                    # Convert thresholded image back to BGR for visualization
+                    thresholded_color = cv2.cvtColor(thresholded, cv2.COLOR_GRAY2BGR)
+                    
+                    # Create a full-size thresholded image (same size as original frame)
+                    full_thresholded = np.zeros_like(frame)
+                    # Place the thresholded ROI in the correct position
+                    full_thresholded[y1:y2, x1:x2] = thresholded_color
+                    
+                    # Draw the ROI rectangle on both images
+                    debug_frame = frame.copy()
+                    cv2.rectangle(debug_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.rectangle(full_thresholded, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    
+                    # Add white percentage text with three decimal places
+                    cv2.putText(
+                        debug_frame, 
+                        f"White %: {white_percentage:.3f}%", 
+                        (10, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 
+                        1, 
+                        (0, 255, 0), 
+                        2
+                    )
+                    
+                    # Create a side-by-side comparison
+                    comparison = np.hstack((debug_frame, full_thresholded))
+                    
+                    # Save the debug frame
+                    debug_path = os.path.join(debug_dir, f"frame_{frame_count:06d}_{frame_time_ms:.1f}ms.jpg")
+                    cv2.imwrite(debug_path, comparison)
+            else:
+                print(f"{Fore.RED}Warning: ROI coordinates ({x1}, {y1}, {x2}, {y2}) out of frame bounds ({frame_width}x{frame_height}){Style.RESET_ALL}")
+                brightness_values.append(0)
             
-            # If white percentage exceeds threshold, just track it
-            # (frames will be saved in event-specific folders later)
-            if white_percentage > white_percentage_threshold:
-                # We don't save to root folder anymore to avoid duplication
-                pass
-        else:
-            print(f"Warning: ROI coordinates ({x1}, {y1}, {x2}, {y2}) out of frame bounds ({frame_width}x{frame_height})")
-            brightness_values.append(0)
-        
-        frame_count += 1
-        
-        # Display progress periodically
-        if (frame_count - start_frame) % 100 == 0 or frame_count == end_frame:
-            progress = ((frame_count - start_frame) / total_frames_to_process) * 100 if total_frames_to_process > 0 else 0
-            print(f"Progress: {progress:.1f}% ({frame_count - start_frame}/{total_frames_to_process})")
+            frame_count += 1
+            pbar.update(1)
             
-        # Check if we've reached the maximum duration to analyze
-        if max_duration_seconds is not None and frame_time_ms >= max_duration_seconds * 1000:
-            print(f"Reached maximum analysis duration of {max_duration_seconds} seconds")
-            break
-            
-        # Check if we've reached the end time
-        if end_time_seconds is not None and frame_time_ms >= end_time_seconds * 1000:
-            print(f"Reached end time of {end_time_seconds} seconds")
-            break
+            # Check if we've reached the maximum duration to analyze
+            if max_duration_seconds is not None and frame_time_ms >= max_duration_seconds * 1000:
+                print(f"\n{Fore.CYAN}Reached maximum analysis duration of {max_duration_seconds} seconds{Style.RESET_ALL}")
+                break
+                
+            # Check if we've reached the end time
+            if end_time_seconds is not None and frame_time_ms >= end_time_seconds * 1000:
+                print(f"\n{Fore.CYAN}Reached end time of {end_time_seconds} seconds{Style.RESET_ALL}")
+                break
     
     cap.release()
     
@@ -316,12 +317,22 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                     "max_brightness": np.max(brightness_array[event[0]:event[-1]+1])
                 })
     
+    # Print summary of detected events
+    print(f"\n{Fore.YELLOW}{'='*60}{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}Analysis Results{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}{'='*60}{Style.RESET_ALL}")
+    
+    if len(shutter_intervals) > 0:
+        print(f"{Fore.GREEN}Detected {Style.BRIGHT}{len(shutter_intervals)} shutter events{Style.RESET_ALL}\n")
+    else:
+        print(f"{Fore.RED}No shutter events detected. Try adjusting the threshold or ROI.{Style.RESET_ALL}\n")
+    
     # Create event-specific folders and save frames with context
     if len(shutter_intervals) > 0:
         # We need to store all frames to include context frames
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            print(f"Error: Could not reopen video file {video_path}")
+            print(f"{Fore.RED}Error: Could not reopen video file {video_path}{Style.RESET_ALL}")
             return output_dir, shutter_intervals
         
         # Process each event
@@ -337,77 +348,80 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
             # Set position to start frame with context
             cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame_with_context)
             
-            # Process frames for this event
-            for frame_idx in range(start_frame_with_context, end_frame_with_context + 1):
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                
-                # Calculate frame timestamp in milliseconds
-                frame_time_ms = frame_idx * ms_per_frame
-                
-                # Extract region of interest
-                if y2 <= frame.shape[0] and x2 <= frame.shape[1]:
-                    roi_frame = frame[y1:y2, x1:x2]
+            # Process frames for this event with a mini progress bar
+            frames_to_process = end_frame_with_context - start_frame_with_context + 1
+            with tqdm(total=frames_to_process, desc=f"Event {i+1}", unit="frame", ncols=80, 
+                      bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}") as event_pbar:
+                for frame_idx in range(start_frame_with_context, end_frame_with_context + 1):
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
                     
-                    # Convert to grayscale
-                    gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
+                    # Calculate frame timestamp in milliseconds
+                    frame_time_ms = frame_idx * ms_per_frame
                     
-                    # Apply thresholding to create binary image
-                    _, thresholded = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
+                    # Extract region of interest
+                    if y2 <= frame.shape[0] and x2 <= frame.shape[1]:
+                        roi_frame = frame[y1:y2, x1:x2]
+                        
+                        # Convert to grayscale
+                        gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
+                        
+                        # Apply thresholding to create binary image
+                        _, thresholded = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
+                        
+                        # Calculate percentage of white pixels
+                        white_pixel_count = np.count_nonzero(thresholded)
+                        total_pixels = thresholded.size
+                        white_percentage = (white_pixel_count / total_pixels) * 100
+                        
+                        # Draw the ROI rectangle on the frame
+                        marked_frame = frame.copy()
+                        cv2.rectangle(marked_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     
-                    # Calculate percentage of white pixels
-                    white_pixel_count = np.count_nonzero(thresholded)
-                    total_pixels = thresholded.size
-                    white_percentage = (white_pixel_count / total_pixels) * 100
-                    
-                    # Draw the ROI rectangle on the frame
-                    marked_frame = frame.copy()
-                    cv2.rectangle(marked_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                
-                    # Add white percentage text with three decimal places
-                    cv2.putText(
-                        marked_frame, 
-                        f"White %: {white_percentage:.3f}%", 
-                        (10, 30), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 
-                        1, 
-                        (0, 255, 0), 
-                        2
-                    )
-                
-                    # Add indicator if this is part of the actual event (not just context)
-                    is_event_frame = event['start_frame'] <= frame_idx <= event['end_frame']
-                    
-                    # Add debugging information if debug mode is enabled
-                    if debug:
-                        print(f"Event {i+1}: Processing frame {frame_idx}")
-                        print(f"  Event range: {event['start_frame']} to {event['end_frame']}")
-                        print(f"  Is event frame: {is_event_frame}")
-                    
-                    if is_event_frame:
+                        # Add white percentage text with three decimal places
                         cv2.putText(
                             marked_frame, 
-                            "SHUTTER EVENT", 
-                            (10, 70), 
+                            f"White %: {white_percentage:.3f}%", 
+                            (10, 30), 
                             cv2.FONT_HERSHEY_SIMPLEX, 
                             1, 
-                            (0, 0, 255), 
+                            (0, 255, 0), 
                             2
                         )
-                        # Add a red rectangle around the edge of the frame instead
-                        # This doesn't change the frame dimensions
-                        h, w = marked_frame.shape[:2]
-                        cv2.rectangle(marked_frame, (0, 0), (w-1, h-1), (0, 0, 255), 3)
-                
-                    # Use a consistent naming pattern that sorts properly but still indicates event vs context
-                    # Add a marker character (e for event, c for context) that doesn't break sorting
-                    marker = "e" if is_event_frame else "c"
-                    output_path = os.path.join(event_dir, f"frame_{frame_idx:06d}_{marker}_{frame_time_ms:.1f}ms.jpg")
-                    cv2.imwrite(output_path, marked_frame)
+                    
+                        # Add indicator if this is part of the actual event (not just context)
+                        is_event_frame = event['start_frame'] <= frame_idx <= event['end_frame']
+                        
+                        if is_event_frame:
+                            cv2.putText(
+                                marked_frame, 
+                                "SHUTTER EVENT", 
+                                (10, 70), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 
+                                1, 
+                                (0, 0, 255), 
+                                2
+                            )
+                            # Add a red rectangle around the edge of the frame
+                            h, w = marked_frame.shape[:2]
+                            cv2.rectangle(marked_frame, (0, 0), (w-1, h-1), (0, 0, 255), 3)
+                    
+                        # Use a consistent naming pattern that sorts properly but still indicates event vs context
+                        marker = "e" if is_event_frame else "c"
+                        output_path = os.path.join(event_dir, f"frame_{frame_idx:06d}_{marker}_{frame_time_ms:.1f}ms.jpg")
+                        cv2.imwrite(output_path, marked_frame)
+                    
+                    event_pbar.update(1)
             
-            print(f"Event {i+1}: Frames {event['start_frame']} to {event['end_frame']} (white percentage: {event['max_brightness']:.1f}%)")
-            print(f"Saved frames for event {i+1} to {event_dir}")
+            # Calculate real-world duration if slow motion was detected
+            if real_fps:
+                real_duration_ms = event['duration_ms'] / slowmo_factor
+                shutter_speed_denominator = int(1000 / real_duration_ms)
+                print(f"{Fore.GREEN}Event {i+1}: {Style.BRIGHT}Frames {event['start_frame']} to {event['end_frame']} {Style.RESET_ALL}(white: {event['max_brightness']:.1f}%, duration: {event['duration_ms']:.1f}ms, real: {real_duration_ms:.1f}ms, ~1/{shutter_speed_denominator}s)")
+            else:
+                shutter_speed_denominator = int(1000 / event['duration_ms'])
+                print(f"{Fore.GREEN}Event {i+1}: {Style.BRIGHT}Frames {event['start_frame']} to {event['end_frame']} {Style.RESET_ALL}(white: {event['max_brightness']:.1f}%, duration: {event['duration_ms']:.1f}ms, ~1/{shutter_speed_denominator}s)")
             
             # Add event folder path to the event dictionary for reporting
             event['folder'] = event_dir
@@ -477,7 +491,7 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
         else:
             report_file.write("No shutter events detected. Try adjusting the threshold or ROI.\n")
     
-    print(f"Analysis report saved to {report_path}")
+    print(f"\n{Fore.CYAN}Analysis report saved to: {Style.BRIGHT}{report_path}{Style.RESET_ALL}")
     
     # Create visualization plots
     if output_visualization and len(brightness_values) > 0:
@@ -520,12 +534,20 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
         plt_path = os.path.join(output_dir, "shutter_analysis_plot.png")
         plt.tight_layout()
         plt.savefig(plt_path)
-        print(f"Analysis plot saved to {plt_path}")
+        print(f"{Fore.CYAN}Analysis plot saved to: {Style.BRIGHT}{plt_path}{Style.RESET_ALL}")
     
-    print(f"All analysis results saved to directory: {output_dir}")
+    print(f"\n{Fore.GREEN}All analysis results saved to: {Style.BRIGHT}{output_dir}{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}{'='*60}{Style.RESET_ALL}")
+    
     return output_dir, shutter_intervals
 
 def main():
+    # Print a nice banner
+    colorama.init()
+    print(f"\n{Fore.CYAN}{'='*60}{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}{Style.BRIGHT}Camera Shutter Speed Analysis Tool{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}{'='*60}{Style.RESET_ALL}\n")
+    
     parser = argparse.ArgumentParser(description='Analyze video to measure camera shutter speed')
     parser.add_argument('video_path', help='Path to the video file')
     parser.add_argument('--roi', nargs=4, type=int, required=True, 
@@ -563,7 +585,7 @@ def main():
             start_time = 0
         if end_time is None:
             end_time = start_time + args.max_duration
-        print("Warning: --max-duration is deprecated. Please use --start-time and --end-time instead.")
+        print(f"{Fore.YELLOW}Warning: --max-duration is deprecated. Please use --start-time and --end-time instead.{Style.RESET_ALL}")
     
     analyze_shutter(
         args.video_path, 
