@@ -222,10 +222,10 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                 cv2.rectangle(debug_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 cv2.rectangle(full_thresholded, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 
-                # Add white percentage text
+                # Add white percentage text with three decimal places
                 cv2.putText(
                     debug_frame, 
-                    f"White %: {white_percentage:.1f}%", 
+                    f"White %: {white_percentage:.3f}%", 
                     (10, 30), 
                     cv2.FONT_HERSHEY_SIMPLEX, 
                     1, 
@@ -352,10 +352,10 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                     marked_frame = frame.copy()
                     cv2.rectangle(marked_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 
-                    # Add white percentage text
+                    # Add white percentage text with three decimal places
                     cv2.putText(
                         marked_frame, 
-                        f"White %: {white_percentage:.1f}%", 
+                        f"White %: {white_percentage:.3f}%", 
                         (10, 30), 
                         cv2.FONT_HERSHEY_SIMPLEX, 
                         1, 
