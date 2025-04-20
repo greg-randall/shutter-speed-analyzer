@@ -8,7 +8,7 @@ import os
 import time
 
 def analyze_shutter_with_circle_detection(video_path, roi=None, max_time=None, extract_events=False, 
-                                         min_radius=60, max_radius=75, debug=False):
+                                         min_radius=60, max_radius=75, debug=False, threshold=None):
     # Standard shutter speeds in seconds
     standard_speeds = [
         1/8000, 1/4000, 1/2000, 1/1000, 1/500, 1/250, 1/125, 1/60, 1/30, 1/15, 
@@ -95,19 +95,43 @@ def analyze_shutter_with_circle_detection(video_path, roi=None, max_time=None, e
         # 3. Apply blur to reduce noise
         blurred = cv2.GaussianBlur(norm_img, (9, 9), 2)
         
+        # Apply thresholding if specified
+        if threshold is not None:
+            _, thresholded = cv2.threshold(blurred, threshold, 255, cv2.THRESH_BINARY)
+            # Use the thresholded image for circle detection
+            processed_img = thresholded
+        else:
+            # Use the blurred image if no threshold specified
+            processed_img = blurred
+        
         # Debug: Save processing steps
         if debug and frame_count % 5 == 0:  # Save every 5th frame to reduce disk usage
-            debug_frame = np.zeros((h*2, w*2), dtype=np.uint8)
-            debug_frame[0:h, 0:w] = gray
-            debug_frame[0:h, w:w*2] = clahe_img
-            debug_frame[h:h*2, 0:w] = norm_img
-            debug_frame[h:h*2, w:w*2] = blurred
-            
-            # Add labels
-            cv2.putText(debug_frame, "Original Gray", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
-            cv2.putText(debug_frame, "CLAHE", (w+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
-            cv2.putText(debug_frame, "Normalized", (10, h+20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
-            cv2.putText(debug_frame, "Blurred", (w+10, h+20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
+            if threshold is not None:
+                # Create a larger debug frame to include thresholded image
+                debug_frame = np.zeros((h*2, w*2), dtype=np.uint8)
+                debug_frame[0:h, 0:w] = gray
+                debug_frame[0:h, w:w*2] = clahe_img
+                debug_frame[h:h*2, 0:w] = norm_img
+                debug_frame[h:h*2, w:w*2] = thresholded  # Show thresholded instead of blurred
+                
+                # Add labels
+                cv2.putText(debug_frame, "Original Gray", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
+                cv2.putText(debug_frame, "CLAHE", (w+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
+                cv2.putText(debug_frame, "Normalized", (10, h+20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
+                cv2.putText(debug_frame, "Thresholded", (w+10, h+20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
+            else:
+                # Original debug frame without thresholding
+                debug_frame = np.zeros((h*2, w*2), dtype=np.uint8)
+                debug_frame[0:h, 0:w] = gray
+                debug_frame[0:h, w:w*2] = clahe_img
+                debug_frame[h:h*2, 0:w] = norm_img
+                debug_frame[h:h*2, w:w*2] = blurred
+                
+                # Add labels
+                cv2.putText(debug_frame, "Original Gray", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
+                cv2.putText(debug_frame, "CLAHE", (w+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
+                cv2.putText(debug_frame, "Normalized", (10, h+20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
+                cv2.putText(debug_frame, "Blurred", (w+10, h+20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
             
             cv2.imwrite(os.path.join('debug', f'process_frame_{frame_count:06d}.jpg'), debug_frame)
         
@@ -116,7 +140,7 @@ def analyze_shutter_with_circle_detection(video_path, roi=None, max_time=None, e
         center_x, center_y, radius = None, None, None
         
         circles = cv2.HoughCircles(
-            blurred, 
+            processed_img,            # Use the processed image (thresholded or blurred)
             cv2.HOUGH_GRADIENT, 
             dp=1,                     # Resolution ratio
             minDist=100,              # Min distance between circles (large as we expect only one)
@@ -331,6 +355,8 @@ def main():
                         help='Extract frames for each detected shutter event')
     parser.add_argument('--debug', action='store_true',
                         help='Enable debug mode to save processing steps to debug folder')
+    parser.add_argument('--threshold', type=int, choices=range(1, 256), metavar="[1-255]",
+                        help='Threshold value (1-255) to separate black shutter from white circle')
     args = parser.parse_args()
     
     # Set ROI if provided
@@ -350,7 +376,8 @@ def main():
         extract_events=args.extract,
         min_radius=args.min_radius,
         max_radius=args.max_radius,
-        debug=args.debug
+        debug=args.debug,
+        threshold=args.threshold
     )
 
     print("\nShutter Event Results:")
