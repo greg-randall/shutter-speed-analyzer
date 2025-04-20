@@ -18,6 +18,92 @@ import numpy as np
 from tqdm import tqdm
 
 
+def extract_android_fps(metadata, info):
+    """
+    Extract Android-specific FPS information from metadata.
+    
+    Args:
+        metadata: Raw metadata from ffprobe
+        info: Dictionary to populate with extracted information
+    """
+    if 'format' in metadata and 'tags' in metadata['format']:
+        format_tags = metadata['format']['tags']
+        if 'com.android.capture.fps' in format_tags:
+            try:
+                android_fps = float(format_tags['com.android.capture.fps'])
+                # If this is significantly higher than container FPS, use it as real_fps
+                if info['container_fps'] is None or android_fps > info['container_fps'] * 1.5:
+                    info['real_fps'] = android_fps
+                    print(f"Found Android capture FPS: {android_fps}")
+            except (ValueError, TypeError):
+                pass
+
+
+def extract_fps_from_filename(video_path, info):
+    """
+    Try to extract FPS information from the video filename.
+    
+    Args:
+        video_path: Path to the video file
+        info: Dictionary to populate with extracted information
+    """
+    # Check filename for common slow motion indicators (like "240fps" or "240p")
+    fps_in_filename = re.search(r'(\d+)(?:fps|FPS|p)', os.path.basename(video_path))
+    if fps_in_filename:
+        potential_fps = float(fps_in_filename.group(1))
+        if potential_fps > 60:  # Assume it's slow motion if > 60fps
+            info['real_fps'] = potential_fps
+
+
+
+def create_debug_frame(frame, roi, white_percentage, thresholded):
+    """
+    Create a debug frame with visualization of the ROI and thresholding.
+    
+    Args:
+        frame: Original video frame
+        roi: Region of interest as (x1, y1, x2, y2)
+        white_percentage: Calculated white pixel percentage
+        thresholded: Thresholded binary image
+        
+    Returns:
+        Debug frame with visualizations
+    """
+    x1, y1, x2, y2 = roi
+    
+    # Convert thresholded image back to BGR for visualization
+    thresholded_color = cv2.cvtColor(thresholded, cv2.COLOR_GRAY2BGR)
+    
+    # Create a full-size thresholded image (same size as original frame)
+    full_thresholded = np.zeros_like(frame)
+    # Place the thresholded ROI in the correct position
+    full_thresholded[y1:y2, x1:x2] = thresholded_color
+    
+    # Draw the ROI rectangle on both images
+    debug_frame = frame.copy()
+    cv2.rectangle(debug_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    cv2.rectangle(full_thresholded, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    
+    # Add white percentage text with three decimal places
+    cv2.putText(
+        debug_frame, 
+        f"White %: {white_percentage:.3f}%", 
+        (10, 30), 
+        cv2.FONT_HERSHEY_SIMPLEX, 
+        1, 
+        (0, 255, 0), 
+        2
+    )
+    
+    # Create a side-by-side comparison
+    comparison = np.hstack((debug_frame, full_thresholded))
+    
+    return comparison
+
+
+
+
+
 def calculate_frame_times(frame_idx, container_fps, slowmo_factor=1.0):
     """
     Calculate consistent frame times in both video time and real-world time.
@@ -94,6 +180,40 @@ def reliable_frame_seek(cap, target_frame):
             return False
     
     return True
+def extract_stream_metadata(metadata, info):
+    """
+    Extract metadata from video streams.
+    
+    Args:
+        metadata: Raw metadata from ffprobe
+        info: Dictionary to populate with extracted information
+    """
+    for stream in metadata.get('streams', []):
+        if stream.get('codec_type') == 'video':
+            # Get resolution
+            info['width'] = stream.get('width')
+            info['height'] = stream.get('height')
+            
+            # Get FPS from container
+            if 'r_frame_rate' in stream:
+                fps_str = stream['r_frame_rate']
+                if '/' in fps_str:
+                    num, den = map(int, fps_str.split('/'))
+                    info['container_fps'] = num / den if den != 0 else None
+            
+            # Look for metadata tags that might indicate slow motion
+            tags = stream.get('tags', {})
+            for key, value in tags.items():
+                # Look for common slow motion indicators in metadata
+                if 'slow' in key.lower() or 'fps' in key.lower() or 'frame_rate' in key.lower():
+                    # Try to extract a number from the value
+                    fps_match = re.search(r'(\d+)(?:\.\d+)?(?:\s*fps)?', str(value))
+                    if fps_match:
+                        potential_fps = float(fps_match.group(1))
+                        # If it's significantly higher than container FPS, it might be the real capture rate
+                        if info['container_fps'] is None or potential_fps > info['container_fps'] * 1.5:
+                            info['real_fps'] = potential_fps
+
 
 def get_video_metadata(video_path):
     """
@@ -898,122 +1018,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-def extract_stream_metadata(metadata, info):
-    """
-    Extract metadata from video streams.
-    
-    Args:
-        metadata: Raw metadata from ffprobe
-        info: Dictionary to populate with extracted information
-    """
-    for stream in metadata.get('streams', []):
-        if stream.get('codec_type') == 'video':
-            # Get resolution
-            info['width'] = stream.get('width')
-            info['height'] = stream.get('height')
-            
-            # Get FPS from container
-            if 'r_frame_rate' in stream:
-                fps_str = stream['r_frame_rate']
-                if '/' in fps_str:
-                    num, den = map(int, fps_str.split('/'))
-                    info['container_fps'] = num / den if den != 0 else None
-            
-            # Look for metadata tags that might indicate slow motion
-            tags = stream.get('tags', {})
-            for key, value in tags.items():
-                # Look for common slow motion indicators in metadata
-                if 'slow' in key.lower() or 'fps' in key.lower() or 'frame_rate' in key.lower():
-                    # Try to extract a number from the value
-                    fps_match = re.search(r'(\d+)(?:\.\d+)?(?:\s*fps)?', str(value))
-                    if fps_match:
-                        potential_fps = float(fps_match.group(1))
-                        # If it's significantly higher than container FPS, it might be the real capture rate
-                        if info['container_fps'] is None or potential_fps > info['container_fps'] * 1.5:
-                            info['real_fps'] = potential_fps
-
-
-def extract_android_fps(metadata, info):
-    """
-    Extract Android-specific FPS information from metadata.
-    
-    Args:
-        metadata: Raw metadata from ffprobe
-        info: Dictionary to populate with extracted information
-    """
-    if 'format' in metadata and 'tags' in metadata['format']:
-        format_tags = metadata['format']['tags']
-        if 'com.android.capture.fps' in format_tags:
-            try:
-                android_fps = float(format_tags['com.android.capture.fps'])
-                # If this is significantly higher than container FPS, use it as real_fps
-                if info['container_fps'] is None or android_fps > info['container_fps'] * 1.5:
-                    info['real_fps'] = android_fps
-                    print(f"Found Android capture FPS: {android_fps}")
-            except (ValueError, TypeError):
-                pass
-
-
-def extract_fps_from_filename(video_path, info):
-    """
-    Try to extract FPS information from the video filename.
-    
-    Args:
-        video_path: Path to the video file
-        info: Dictionary to populate with extracted information
-    """
-    # Check filename for common slow motion indicators (like "240fps" or "240p")
-    fps_in_filename = re.search(r'(\d+)(?:fps|FPS|p)', os.path.basename(video_path))
-    if fps_in_filename:
-        potential_fps = float(fps_in_filename.group(1))
-        if potential_fps > 60:  # Assume it's slow motion if > 60fps
-            info['real_fps'] = potential_fps
-
-
-
-def create_debug_frame(frame, roi, white_percentage, thresholded):
-    """
-    Create a debug frame with visualization of the ROI and thresholding.
-    
-    Args:
-        frame: Original video frame
-        roi: Region of interest as (x1, y1, x2, y2)
-        white_percentage: Calculated white pixel percentage
-        thresholded: Thresholded binary image
-        
-    Returns:
-        Debug frame with visualizations
-    """
-    x1, y1, x2, y2 = roi
-    
-    # Convert thresholded image back to BGR for visualization
-    thresholded_color = cv2.cvtColor(thresholded, cv2.COLOR_GRAY2BGR)
-    
-    # Create a full-size thresholded image (same size as original frame)
-    full_thresholded = np.zeros_like(frame)
-    # Place the thresholded ROI in the correct position
-    full_thresholded[y1:y2, x1:x2] = thresholded_color
-    
-    # Draw the ROI rectangle on both images
-    debug_frame = frame.copy()
-    cv2.rectangle(debug_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-    cv2.rectangle(full_thresholded, (x1, y1), (x2, y2), (0, 255, 0), 2)
-    
-    # Add white percentage text with three decimal places
-    cv2.putText(
-        debug_frame, 
-        f"White %: {white_percentage:.3f}%", 
-        (10, 30), 
-        cv2.FONT_HERSHEY_SIMPLEX, 
-        1, 
-        (0, 255, 0), 
-        2
-    )
-    
-    # Create a side-by-side comparison
-    comparison = np.hstack((debug_frame, full_thresholded))
-    
-    return comparison
-
-
-
