@@ -387,10 +387,10 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                         h, w = marked_frame.shape[:2]
                         cv2.rectangle(marked_frame, (0, 0), (w-1, h-1), (0, 0, 255), 3)
                 
-                    # Save the frame with new naming convention
-                    # Add indicator in filename if this is an event frame
-                    prefix = "event" if is_event_frame else "context"
-                    output_path = os.path.join(event_dir, f"{prefix}-{i+1:03d}_frame_{frame_idx:06d}_{frame_time_ms:.1f}ms.jpg")
+                    # Use a consistent naming pattern that sorts properly but still indicates event vs context
+                    # Add a marker character (e for event, c for context) that doesn't break sorting
+                    marker = "e" if is_event_frame else "c"
+                    output_path = os.path.join(event_dir, f"frame_{frame_idx:06d}_{marker}_{frame_time_ms:.1f}ms.jpg")
                     cv2.imwrite(output_path, marked_frame)
             
             print(f"Event {i+1}: Frames {event['start_frame']} to {event['end_frame']} (white percentage: {event['max_brightness']:.1f}%)")
