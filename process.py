@@ -15,6 +15,27 @@ from tqdm import tqdm
 import colorama
 from colorama import Fore, Style
 
+def calculate_frame_times(frame_idx, container_fps, slowmo_factor=1.0):
+    """
+    Calculate consistent frame times in both video time and real-world time
+    
+    Args:
+        frame_idx: Frame index
+        container_fps: Container frame rate
+        slowmo_factor: Slow motion factor (real_fps / container_fps)
+        
+    Returns:
+        Tuple of (video_time_ms, real_time_ms)
+    """
+    # Time in the video timeline (as played back)
+    ms_per_frame = 1000.0 / container_fps
+    video_time_ms = frame_idx * ms_per_frame
+    
+    # Real-world time (adjusted for slow motion if detected)
+    real_time_ms = video_time_ms / slowmo_factor if slowmo_factor > 1.0 else video_time_ms
+    
+    return video_time_ms, real_time_ms
+
 def create_frame_brightness_map(brightness_values, start_frame):
     """
     Create a mapping of frame indices to their brightness values
@@ -260,12 +281,9 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
             if not ret:
                 break
             
-            # Calculate frame timestamp in milliseconds
-            frame_time_ms = frame_count * ms_per_frame
-            frame_timestamps.append(frame_time_ms)
-            
-            # Also track real-world time if slow motion is detected
-            real_time_ms = frame_count * real_ms_per_frame
+            # Calculate frame timestamps consistently
+            video_time_ms, real_time_ms = calculate_frame_times(frame_count, container_fps, slowmo_factor)
+            frame_timestamps.append(video_time_ms)
             
             # Extract region of interest
             if y2 <= frame.shape[0] and x2 <= frame.shape[1]:
@@ -361,9 +379,10 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                 # Add start_frame to convert from relative to absolute frame indices
                 start_frame_idx = event[0] + start_frame
                 end_frame_idx = event[-1] + start_frame
-                duration_ms = (end_frame_idx - start_frame_idx + 1) * ms_per_frame
-                start_time_ms = start_frame_idx * ms_per_frame
-                end_time_ms = end_frame_idx * ms_per_frame
+                start_time_ms, start_real_time_ms = calculate_frame_times(start_frame_idx, container_fps, slowmo_factor)
+                end_time_ms, end_real_time_ms = calculate_frame_times(end_frame_idx, container_fps, slowmo_factor)
+                duration_ms = end_time_ms - start_time_ms + (ms_per_frame)  # Add one frame duration to include the last frame
+                real_duration_ms = end_real_time_ms - start_real_time_ms + (ms_per_frame / slowmo_factor)
                         
                 shutter_intervals.append({
                     "start_frame": start_frame_idx,  # Now using absolute frame indices
@@ -371,6 +390,9 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                     "start_time_ms": start_time_ms,
                     "end_time_ms": end_time_ms,
                     "duration_ms": duration_ms,
+                    "real_start_time_ms": start_real_time_ms,
+                    "real_end_time_ms": end_real_time_ms,
+                    "real_duration_ms": real_duration_ms,
                     "max_brightness": np.max(brightness_array[event[0]:event[-1]+1])
                 })
     
@@ -416,8 +438,8 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                     if not ret:
                         break
                     
-                    # Calculate frame timestamp in milliseconds
-                    frame_time_ms = frame_idx * ms_per_frame
+                    # Calculate frame timestamps consistently
+                    video_time_ms, real_time_ms = calculate_frame_times(frame_idx, container_fps, slowmo_factor)
                     
                     # Extract region of interest
                     if y2 <= frame.shape[0] and x2 <= frame.shape[1]:
@@ -499,16 +521,15 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                     
                         # Use a consistent naming pattern that sorts properly but still indicates event vs context
                         marker = "e" if is_event_frame else ("x" if expected_event_frame else "c")
-                        output_path = os.path.join(event_dir, f"frame_{frame_idx:06d}_{marker}_{frame_time_ms:.1f}ms.jpg")
+                        output_path = os.path.join(event_dir, f"frame_{frame_idx:06d}_{marker}_{video_time_ms:.1f}ms.jpg")
                         cv2.imwrite(output_path, marked_frame)
                     
                     event_pbar.update(1)
             
-            # Calculate real-world duration if slow motion was detected
+            # Use pre-calculated real-world duration
             if real_fps:
-                real_duration_ms = event['duration_ms'] / slowmo_factor
-                shutter_speed_denominator = int(1000 / real_duration_ms)
-                print(f"{Fore.GREEN}Event {i+1}: {Style.BRIGHT}Frames {event['start_frame']} to {event['end_frame']} {Style.RESET_ALL}(white: {event['max_brightness']:.1f}%, duration: {event['duration_ms']:.1f}ms, real: {real_duration_ms:.1f}ms, ~1/{shutter_speed_denominator}s)")
+                shutter_speed_denominator = int(1000 / event['real_duration_ms'])
+                print(f"{Fore.GREEN}Event {i+1}: {Style.BRIGHT}Frames {event['start_frame']} to {event['end_frame']} {Style.RESET_ALL}(white: {event['max_brightness']:.1f}%, duration: {event['duration_ms']:.1f}ms, real: {event['real_duration_ms']:.1f}ms, ~1/{shutter_speed_denominator}s)")
             else:
                 shutter_speed_denominator = int(1000 / event['duration_ms'])
                 print(f"{Fore.GREEN}Event {i+1}: {Style.BRIGHT}Frames {event['start_frame']} to {event['end_frame']} {Style.RESET_ALL}(white: {event['max_brightness']:.1f}%, duration: {event['duration_ms']:.1f}ms, ~1/{shutter_speed_denominator}s)")
@@ -549,12 +570,11 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                 if 'folder' in event:
                     report_file.write(f"  Event folder: {os.path.basename(event['folder'])}\n")
                 
-                # If slow motion was detected, calculate real-world duration
+                # Use pre-calculated real-world duration
                 if real_fps:
-                    real_duration_ms = event['duration_ms'] / slowmo_factor
-                    report_file.write(f"  Real-world duration: {real_duration_ms:.2f}ms\n")
+                    report_file.write(f"  Real-world duration: {event['real_duration_ms']:.2f}ms\n")
                     # Convert to traditional shutter speed notation (1/x sec)
-                    shutter_speed_denominator = int(1000 / real_duration_ms)
+                    shutter_speed_denominator = int(1000 / event['real_duration_ms'])
                     report_file.write(f"  Approximate shutter speed: 1/{shutter_speed_denominator} sec\n\n")
                 else:
                     # Convert to traditional shutter speed notation (1/x sec)
