@@ -281,25 +281,26 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
     if len(shutter_frames) > 0:
         # Find gaps in consecutive frame sequences
         gaps = np.where(np.diff(shutter_frames) > 1)[0]
-        
+                
         # Split into individual events
         shutter_events_grouped = np.split(shutter_frames, gaps + 1)
-        
+                
         for event in shutter_events_grouped:
             if len(event) > 0:
-                start_frame = event[0]
-                end_frame = event[-1]
-                duration_ms = (end_frame - start_frame + 1) * ms_per_frame
-                start_time_ms = start_frame * ms_per_frame
-                end_time_ms = end_frame * ms_per_frame
-                
+                # Add start_frame to convert from relative to absolute frame indices
+                start_frame_idx = event[0] + start_frame
+                end_frame_idx = event[-1] + start_frame
+                duration_ms = (end_frame_idx - start_frame_idx + 1) * ms_per_frame
+                start_time_ms = start_frame_idx * ms_per_frame
+                end_time_ms = end_frame_idx * ms_per_frame
+                        
                 shutter_intervals.append({
-                    "start_frame": start_frame,
-                    "end_frame": end_frame,
+                    "start_frame": start_frame_idx,  # Now using absolute frame indices
+                    "end_frame": end_frame_idx,      # Now using absolute frame indices
                     "start_time_ms": start_time_ms,
                     "end_time_ms": end_time_ms,
                     "duration_ms": duration_ms,
-                    "max_brightness": np.max(brightness_array[start_frame:end_frame+1])
+                    "max_brightness": np.max(brightness_array[event[0]:event[-1]+1])
                 })
     
     # Create event-specific folders and save frames with context
