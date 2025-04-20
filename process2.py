@@ -382,14 +382,10 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                             (0, 0, 255), 
                             2
                         )
-                        # Add a red border around the frame to make event frames more obvious
-                        border_size = 10
-                        marked_frame = cv2.copyMakeBorder(
-                            marked_frame, 
-                            border_size, border_size, border_size, border_size, 
-                            cv2.BORDER_CONSTANT, 
-                            value=(0, 0, 255)
-                        )
+                        # Add a red rectangle around the edge of the frame instead
+                        # This doesn't change the frame dimensions
+                        h, w = marked_frame.shape[:2]
+                        cv2.rectangle(marked_frame, (0, 0), (w-1, h-1), (0, 0, 255), 3)
                 
                     # Save the frame with new naming convention
                     # Add indicator in filename if this is an event frame
