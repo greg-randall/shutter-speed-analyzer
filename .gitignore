@@ -2,3 +2,5 @@
 *.mp4
 *.txt
 *.png
+.aider*
+old/*
