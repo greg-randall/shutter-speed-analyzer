@@ -80,7 +80,7 @@ def get_video_metadata(video_path):
         print(f"Warning: Could not extract metadata using ffprobe: {e}")
         return None
 
-def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, output_visualization=True, debug=False, metadata=None):
+def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, output_visualization=True, debug=False, metadata=None, white_percentage_threshold=10.0):
     # Create output folder with timestamp
     timestamp = int(time.time())
     output_dir = f"shutter_test_{timestamp}"
@@ -171,16 +171,20 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, outpu
             # Convert to grayscale
             gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
             
-            # Calculate the average brightness in the ROI
-            avg_brightness = np.mean(gray)
-            brightness_values.append(avg_brightness)
+            # Apply thresholding to create binary image
+            _, thresholded = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
+            
+            # Calculate percentage of white pixels (brightness > threshold)
+            white_pixel_count = np.count_nonzero(thresholded)
+            total_pixels = thresholded.size
+            white_percentage = (white_pixel_count / total_pixels) * 100
+            
+            # Store the white percentage
+            brightness_values.append(white_percentage)
             
             # Save debug frames if debug mode is enabled
             if debug:
-                # Create a thresholded binary image
-                _, thresholded = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
-                
-                # Convert back to BGR for visualization
+                # Convert thresholded image back to BGR for visualization
                 thresholded_color = cv2.cvtColor(thresholded, cv2.COLOR_GRAY2BGR)
                 
                 # Create a full-size thresholded image (same size as original frame)
@@ -193,10 +197,10 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, outpu
                 cv2.rectangle(debug_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 cv2.rectangle(full_thresholded, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 
-                # Add brightness text
+                # Add white percentage text
                 cv2.putText(
                     debug_frame, 
-                    f"Brightness: {avg_brightness:.1f}", 
+                    f"White %: {white_percentage:.1f}%", 
                     (10, 30), 
                     cv2.FONT_HERSHEY_SIMPLEX, 
                     1, 
@@ -211,15 +215,15 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, outpu
                 debug_path = os.path.join(debug_dir, f"frame_{frame_count:06d}_{frame_time_ms:.1f}ms.jpg")
                 cv2.imwrite(debug_path, comparison)
             
-            # If brightness exceeds threshold, save the frame
-            if avg_brightness > threshold:
+            # If white percentage exceeds threshold, save the frame
+            if white_percentage > white_percentage_threshold:
                 # Draw the ROI rectangle on the frame
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 
-                # Add brightness text
+                # Add white percentage text
                 cv2.putText(
                     frame, 
-                    f"Brightness: {avg_brightness:.1f}", 
+                    f"White %: {white_percentage:.1f}%", 
                     (10, 30), 
                     cv2.FONT_HERSHEY_SIMPLEX, 
                     1, 
@@ -252,8 +256,8 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, outpu
     brightness_array = np.array(brightness_values)
     timestamps_array = np.array(frame_timestamps)
     
-    # Find shutter events (frames above threshold)
-    shutter_events = brightness_array > threshold
+    # Find shutter events (frames above white percentage threshold)
+    shutter_events = brightness_array > white_percentage_threshold
     shutter_frames = np.where(shutter_events)[0]
     
     # Group consecutive frames into single events
@@ -291,7 +295,8 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, outpu
         report_file.write(f"FPS: {fps} (each frame is {ms_per_frame:.2f}ms)\n")
         report_file.write(f"Total frames analyzed: {frame_count}\n")
         report_file.write(f"ROI: ({x1}, {y1}) to ({x2}, {y2})\n")
-        report_file.write(f"Brightness threshold: {threshold}\n")
+        report_file.write(f"Brightness threshold: {threshold} (pixels above this value are considered 'white')\n")
+        report_file.write(f"White percentage threshold: {white_percentage_threshold}%\n")
         if max_duration_seconds is not None:
             report_file.write(f"Maximum duration analyzed: {max_duration_seconds} seconds\n")
         report_file.write("\n")
@@ -347,10 +352,10 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, outpu
         # Plot brightness over time
         plt.subplot(2, 1, 1)
         plt.plot(timestamps_array, brightness_array)
-        plt.axhline(y=threshold, color='r', linestyle='--', label=f'Threshold ({threshold})')
-        plt.title('Brightness in ROI over Time')
+        plt.axhline(y=white_percentage_threshold, color='r', linestyle='--', label=f'Threshold ({white_percentage_threshold}%)')
+        plt.title('White Pixel Percentage in ROI over Time')
         plt.xlabel('Time (ms)')
-        plt.ylabel('Average Brightness')
+        plt.ylabel('White Pixel Percentage (%)')
         plt.grid(True)
         plt.legend()
         
@@ -392,7 +397,9 @@ def main():
     parser.add_argument('--roi', nargs=4, type=int, required=True, 
                         help='Region of interest as x1 y1 x2 y2 (top-left and bottom-right coordinates)')
     parser.add_argument('--threshold', type=int, default=100, 
-                        help='Brightness threshold (0-255, default: 100)')
+                        help='Brightness threshold (0-255) for converting to binary image')
+    parser.add_argument('--white-percentage', type=float, default=10.0,
+                        help='Percentage of white pixels in ROI to consider as a shutter event (default: 10.0)')
     parser.add_argument('--max-duration', type=float, 
                         help='Maximum duration to analyze in seconds')
     parser.add_argument('--no-plot', action='store_true',
@@ -416,7 +423,8 @@ def main():
         max_duration_seconds=args.max_duration,
         output_visualization=not args.no_plot,
         debug=args.debug,
-        metadata=metadata
+        metadata=metadata,
+        white_percentage_threshold=args.white_percentage
     )
 
 if __name__ == "__main__":
