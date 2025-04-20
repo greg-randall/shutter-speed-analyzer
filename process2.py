@@ -364,7 +364,7 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                     # Draw the ROI rectangle on the frame
                     marked_frame = frame.copy()
                     cv2.rectangle(marked_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    
+                
                     # Add white percentage text
                     cv2.putText(
                         marked_frame, 
@@ -375,11 +375,27 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                         (0, 255, 0), 
                         2
                     )
-                    
+                
+                    # Add indicator if this is part of the actual event (not just context)
+                    is_event_frame = event['start_frame'] <= frame_idx <= event['end_frame']
+                    if is_event_frame:
+                        cv2.putText(
+                            marked_frame, 
+                            "SHUTTER EVENT", 
+                            (10, 70), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 
+                            1, 
+                            (0, 0, 255), 
+                            2
+                        )
+                
                     # Save the frame with new naming convention
-                    output_path = os.path.join(event_dir, f"event-{i+1:03d}_frame_{frame_idx:06d}_{frame_time_ms:.1f}ms.jpg")
+                    # Add indicator in filename if this is an event frame
+                    prefix = "event" if is_event_frame else "context"
+                    output_path = os.path.join(event_dir, f"{prefix}-{i+1:03d}_frame_{frame_idx:06d}_{frame_time_ms:.1f}ms.jpg")
                     cv2.imwrite(output_path, marked_frame)
             
+            print(f"Event {i+1}: Frames {event['start_frame']} to {event['end_frame']} (white percentage: {event['max_brightness']:.1f}%)")
             print(f"Saved frames for event {i+1} to {event_dir}")
             
             # Add event folder path to the event dictionary for reporting
