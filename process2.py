@@ -316,6 +316,77 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                     "max_brightness": np.max(brightness_array[start_frame:end_frame+1])
                 })
     
+    # Create event-specific folders and save frames with context
+    if len(shutter_intervals) > 0:
+        # We need to store all frames to include context frames
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            print(f"Error: Could not reopen video file {video_path}")
+            return output_dir, shutter_intervals
+        
+        # Process each event
+        for i, event in enumerate(shutter_intervals):
+            # Create folder for this event
+            event_dir = os.path.join(output_dir, f"shutter-event-{i+1:03d}")
+            os.makedirs(event_dir, exist_ok=True)
+            
+            # Calculate frame range with context (5 frames before and after)
+            start_frame_with_context = max(event['start_frame'] - 5, 0)
+            end_frame_with_context = min(event['end_frame'] + 5, total_frames - 1)
+            
+            # Set position to start frame with context
+            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame_with_context)
+            
+            # Process frames for this event
+            for frame_idx in range(start_frame_with_context, end_frame_with_context + 1):
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                
+                # Calculate frame timestamp in milliseconds
+                frame_time_ms = frame_idx * ms_per_frame
+                
+                # Extract region of interest
+                if y2 <= frame.shape[0] and x2 <= frame.shape[1]:
+                    roi_frame = frame[y1:y2, x1:x2]
+                    
+                    # Convert to grayscale
+                    gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
+                    
+                    # Apply thresholding to create binary image
+                    _, thresholded = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
+                    
+                    # Calculate percentage of white pixels
+                    white_pixel_count = np.count_nonzero(thresholded)
+                    total_pixels = thresholded.size
+                    white_percentage = (white_pixel_count / total_pixels) * 100
+                    
+                    # Draw the ROI rectangle on the frame
+                    marked_frame = frame.copy()
+                    cv2.rectangle(marked_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    
+                    # Add white percentage text
+                    cv2.putText(
+                        marked_frame, 
+                        f"White %: {white_percentage:.1f}%", 
+                        (10, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 
+                        1, 
+                        (0, 255, 0), 
+                        2
+                    )
+                    
+                    # Save the frame with new naming convention
+                    output_path = os.path.join(event_dir, f"event-{i+1:03d}_frame_{frame_idx:06d}_{frame_time_ms:.1f}ms.jpg")
+                    cv2.imwrite(output_path, marked_frame)
+            
+            print(f"Saved frames for event {i+1} to {event_dir}")
+            
+            # Add event folder path to the event dictionary for reporting
+            event['folder'] = event_dir
+        
+        cap.release()
+    
     # Generate report
     report_path = os.path.join(output_dir, "shutter_analysis_report.txt")
     with open(report_path, "w") as report_file:
@@ -344,6 +415,8 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                 report_file.write(f"  Video time: {event['start_time_ms']:.2f}ms to {event['end_time_ms']:.2f}ms\n")
                 report_file.write(f"  Video duration: {event['duration_ms']:.2f}ms\n")
                 report_file.write(f"  Max brightness: {event['max_brightness']:.1f}\n")
+                if 'folder' in event:
+                    report_file.write(f"  Event folder: {os.path.basename(event['folder'])}\n")
                 
                 # If slow motion was detected, calculate real-world duration
                 if real_fps:
