@@ -80,7 +80,7 @@ def get_video_metadata(video_path):
         print(f"Warning: Could not extract metadata using ffprobe: {e}")
         return None
 
-def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, output_visualization=True, debug=False, metadata=None, white_percentage_threshold=10.0):
+def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start_time_seconds=None, end_time_seconds=None, output_visualization=True, debug=False, metadata=None, white_percentage_threshold=10.0):
     # Create output folder with timestamp
     timestamp = int(time.time())
     output_dir = f"shutter_test_{timestamp}"
@@ -138,16 +138,38 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, outpu
     print(f"ROI: ({x1}, {y1}) to ({x2}, {y2})")
     print(f"Brightness threshold: {threshold}")
     
+    # Print analysis time range
+    if start_time_seconds is not None:
+        print(f"Will start analysis at {start_time_seconds} seconds")
+    if end_time_seconds is not None:
+        print(f"Will end analysis at {end_time_seconds} seconds")
     if max_duration_seconds is not None:
         print(f"Will analyze up to {max_duration_seconds} seconds of video")
         # Calculate the frame number where we'll stop
         max_frames = int(max_duration_seconds * fps)
         if max_frames < total_frames:
             total_frames = max_frames
-    else:
+    if start_time_seconds is None and end_time_seconds is None and max_duration_seconds is None:
         print("Will analyze the entire video")
     
-    frame_count = 0
+    # Calculate frame numbers for start and end times
+    start_frame = 0
+    if start_time_seconds is not None:
+        start_frame = int(start_time_seconds * fps)
+        # Seek to the start position
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    
+    end_frame = total_frames
+    if end_time_seconds is not None:
+        end_frame = int(end_time_seconds * fps)
+        if end_frame > total_frames:
+            end_frame = total_frames
+    
+    # Calculate total frames to process
+    total_frames_to_process = end_frame - start_frame
+    print(f"Will process {total_frames_to_process} frames (from frame {start_frame} to {end_frame})")
+    
+    frame_count = start_frame
     brightness_values = []
     frame_timestamps = []
     
@@ -241,13 +263,18 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, outpu
         frame_count += 1
         
         # Display progress periodically
-        if frame_count % 100 == 0 or frame_count == total_frames:
-            progress = (frame_count / total_frames) * 100 if total_frames > 0 else 0
-            print(f"Progress: {progress:.1f}% ({frame_count}/{total_frames})")
+        if (frame_count - start_frame) % 100 == 0 or frame_count == end_frame:
+            progress = ((frame_count - start_frame) / total_frames_to_process) * 100 if total_frames_to_process > 0 else 0
+            print(f"Progress: {progress:.1f}% ({frame_count - start_frame}/{total_frames_to_process})")
             
         # Check if we've reached the maximum duration to analyze
         if max_duration_seconds is not None and frame_time_ms >= max_duration_seconds * 1000:
             print(f"Reached maximum analysis duration of {max_duration_seconds} seconds")
+            break
+            
+        # Check if we've reached the end time
+        if end_time_seconds is not None and frame_time_ms >= end_time_seconds * 1000:
+            print(f"Reached end time of {end_time_seconds} seconds")
             break
     
     cap.release()
@@ -293,10 +320,14 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, outpu
         report_file.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         report_file.write(f"Video: {video_path}\n")
         report_file.write(f"FPS: {fps} (each frame is {ms_per_frame:.2f}ms)\n")
-        report_file.write(f"Total frames analyzed: {frame_count}\n")
+        report_file.write(f"Total frames analyzed: {frame_count - start_frame}\n")
         report_file.write(f"ROI: ({x1}, {y1}) to ({x2}, {y2})\n")
         report_file.write(f"Brightness threshold: {threshold} (pixels above this value are considered 'white')\n")
         report_file.write(f"White percentage threshold: {white_percentage_threshold}%\n")
+        if start_time_seconds is not None:
+            report_file.write(f"Analysis start time: {start_time_seconds} seconds\n")
+        if end_time_seconds is not None:
+            report_file.write(f"Analysis end time: {end_time_seconds} seconds\n")
         if max_duration_seconds is not None:
             report_file.write(f"Maximum duration analyzed: {max_duration_seconds} seconds\n")
         report_file.write("\n")
@@ -400,8 +431,12 @@ def main():
                         help='Brightness threshold (0-255) for converting to binary image')
     parser.add_argument('--white-percentage', type=float, default=10.0,
                         help='Percentage of white pixels in ROI to consider as a shutter event (default: 10.0)')
+    parser.add_argument('--start-time', type=float, 
+                        help='Start time in seconds to begin analysis')
+    parser.add_argument('--end-time', type=float, 
+                        help='End time in seconds to stop analysis')
     parser.add_argument('--max-duration', type=float, 
-                        help='Maximum duration to analyze in seconds')
+                        help='Maximum duration to analyze in seconds (deprecated, use --start-time and --end-time instead)')
     parser.add_argument('--no-plot', action='store_true',
                         help='Skip generating visualization plots')
     parser.add_argument('--debug', action='store_true',
@@ -416,11 +451,24 @@ def main():
     if args.real_fps:
         metadata = {'real_fps': args.real_fps}
     
+    # Handle deprecated max_duration parameter
+    start_time = args.start_time
+    end_time = args.end_time
+    
+    if args.max_duration is not None:
+        if start_time is None:
+            start_time = 0
+        if end_time is None:
+            end_time = start_time + args.max_duration
+        print("Warning: --max-duration is deprecated. Please use --start-time and --end-time instead.")
+    
     analyze_shutter(
         args.video_path, 
         args.roi, 
         args.threshold,
         max_duration_seconds=args.max_duration,
+        start_time_seconds=start_time,
+        end_time_seconds=end_time,
         output_visualization=not args.no_plot,
         debug=args.debug,
         metadata=metadata,
