@@ -475,8 +475,31 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                         if frame_idx in frame_brightness_map:
                             stored_brightness = frame_brightness_map[frame_idx]
                             if abs(white_percentage - stored_brightness) > 1.0:  # Allow small differences due to rounding
-                                print(f"{Fore.YELLOW}Warning: Frame {frame_idx} brightness mismatch. "
-                                      f"First pass: {stored_brightness:.3f}%, Second pass: {white_percentage:.3f}%{Style.RESET_ALL}")
+                                # If this is a critical frame (event frame), try to recover the brightness from the first pass
+                                if expected_event_frame and white_percentage < 0.5:
+                                    print(f"{Fore.RED}Recovering brightness for event frame {frame_idx}. "
+                                          f"Using first pass value: {stored_brightness:.3f}% instead of {white_percentage:.3f}%{Style.RESET_ALL}")
+                                    # Use the stored brightness from first pass for this frame
+                                    white_percentage = stored_brightness
+                                    
+                                    # Re-apply thresholding to create a synthetic thresholded image
+                                    # This creates a white rectangle with the same percentage of white pixels
+                                    synthetic_threshold = np.zeros_like(thresholded)
+                                    h, w = synthetic_threshold.shape
+                                    pixels_to_fill = int((stored_brightness / 100.0) * h * w)
+                                    rect_size = int(np.sqrt(pixels_to_fill))
+                                    if rect_size > 0:
+                                        center_y, center_x = h // 2, w // 2
+                                        half_size = rect_size // 2
+                                        y1 = max(0, center_y - half_size)
+                                        y2 = min(h, center_y + half_size)
+                                        x1 = max(0, center_x - half_size)
+                                        x2 = min(w, center_x + half_size)
+                                        synthetic_threshold[y1:y2, x1:x2] = 255
+                                        thresholded = synthetic_threshold
+                                else:
+                                    print(f"{Fore.YELLOW}Warning: Frame {frame_idx} brightness mismatch. "
+                                          f"First pass: {stored_brightness:.3f}%, Second pass: {white_percentage:.3f}%{Style.RESET_ALL}")
                         
                         # Add indicator if this is part of the actual event (not just context)
                         expected_event_frame = event['start_frame'] <= frame_idx <= event['end_frame']
