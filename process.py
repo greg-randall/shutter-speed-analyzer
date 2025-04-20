@@ -35,18 +35,19 @@ def analyze_shutter_with_circle_detection(video_path, roi=None, max_time=None, e
     print(f"Video dimensions: {frame_width}x{frame_height}")
     print(f"Looking for circles with radius between {min_radius} and {max_radius} pixels")
     
-    # If ROI not specified, use a default central region
+    # If ROI not specified, use the entire frame
     if roi is None:
-        # Define region focusing on where shutter is visible
-        # Make this region large enough to contain the circle with some margin
-        circle_diameter = max_radius * 2
-        x = int(frame_width/2 - circle_diameter/2 - 20)
-        y = int(frame_height/2 - circle_diameter/2 - 20)
-        w = int(circle_diameter + 40)
-        h = int(circle_diameter + 40)
+        # Use the entire frame
+        x = 0
+        y = 0
+        w = frame_width
+        h = frame_height
         roi = (x, y, w, h)
     
-    print(f"Using ROI: x={roi[0]}, y={roi[1]}, width={roi[2]}, height={roi[3]}")
+    if roi[0] == 0 and roi[1] == 0 and roi[2] == frame_width and roi[3] == frame_height:
+        print("Using full frame for circle detection")
+    else:
+        print(f"Using ROI: x={roi[0]}, y={roi[1]}, width={roi[2]}, height={roi[3]}")
     
     # List to track circle presence in each frame
     circle_detected = []
@@ -120,7 +121,7 @@ def analyze_shutter_with_circle_detection(video_path, roi=None, max_time=None, e
             dp=1,                     # Resolution ratio
             minDist=100,              # Min distance between circles (large as we expect only one)
             param1=70,                # Edge detector upper threshold (increased for contrast enhanced image)
-            param2=25,                # Circle detection threshold 
+            param2=20,                # Circle detection threshold (reduced to be more sensitive)
             minRadius=min_radius,     # Min radius based on known diameter (~134px)
             maxRadius=max_radius      # Max radius
         )
