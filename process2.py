@@ -364,6 +364,13 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                 
                     # Add indicator if this is part of the actual event (not just context)
                     is_event_frame = event['start_frame'] <= frame_idx <= event['end_frame']
+                    
+                    # Add debugging information if debug mode is enabled
+                    if debug:
+                        print(f"Event {i+1}: Processing frame {frame_idx}")
+                        print(f"  Event range: {event['start_frame']} to {event['end_frame']}")
+                        print(f"  Is event frame: {is_event_frame}")
+                    
                     if is_event_frame:
                         cv2.putText(
                             marked_frame, 
@@ -373,6 +380,14 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                             1, 
                             (0, 0, 255), 
                             2
+                        )
+                        # Add a red border around the frame to make event frames more obvious
+                        border_size = 10
+                        marked_frame = cv2.copyMakeBorder(
+                            marked_frame, 
+                            border_size, border_size, border_size, border_size, 
+                            cv2.BORDER_CONSTANT, 
+                            value=(0, 0, 255)
                         )
                 
                     # Save the frame with new naming convention
