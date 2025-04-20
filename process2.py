@@ -5,8 +5,82 @@ import time
 import argparse
 import matplotlib.pyplot as plt
 from datetime import datetime
+import subprocess
+import json
+import re
 
-def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, output_visualization=True, debug=False):
+def get_video_metadata(video_path):
+    """Extract metadata from video file using ffprobe"""
+    try:
+        # Try using ffprobe to get detailed metadata
+        cmd = [
+            'ffprobe', 
+            '-v', 'quiet',
+            '-print_format', 'json',
+            '-show_format', 
+            '-show_streams',
+            video_path
+        ]
+        
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        metadata = json.loads(result.stdout)
+        
+        # Extract basic information
+        info = {
+            'container_fps': None,
+            'real_fps': None,
+            'width': None,
+            'height': None,
+            'duration': None,
+        }
+        
+        # Get container FPS
+        for stream in metadata.get('streams', []):
+            if stream.get('codec_type') == 'video':
+                # Get resolution
+                info['width'] = stream.get('width')
+                info['height'] = stream.get('height')
+                
+                # Get FPS from container
+                if 'r_frame_rate' in stream:
+                    fps_str = stream['r_frame_rate']
+                    if '/' in fps_str:
+                        num, den = map(int, fps_str.split('/'))
+                        info['container_fps'] = num / den if den != 0 else None
+                
+                # Look for metadata tags that might indicate slow motion
+                tags = stream.get('tags', {})
+                for key, value in tags.items():
+                    # Look for common slow motion indicators in metadata
+                    if 'slow' in key.lower() or 'fps' in key.lower() or 'frame_rate' in key.lower():
+                        # Try to extract a number from the value
+                        fps_match = re.search(r'(\d+)(?:\.\d+)?(?:\s*fps)?', str(value))
+                        if fps_match:
+                            potential_fps = float(fps_match.group(1))
+                            # If it's significantly higher than container FPS, it might be the real capture rate
+                            if info['container_fps'] is None or potential_fps > info['container_fps'] * 1.5:
+                                info['real_fps'] = potential_fps
+        
+        # Get duration
+        if 'format' in metadata and 'duration' in metadata['format']:
+            info['duration'] = float(metadata['format']['duration'])
+        
+        # If we couldn't find real_fps in metadata, check if filename contains indicators
+        if info['real_fps'] is None:
+            # Check filename for common slow motion indicators (like "240fps" or "240p")
+            fps_in_filename = re.search(r'(\d+)(?:fps|FPS|p)', os.path.basename(video_path))
+            if fps_in_filename:
+                potential_fps = float(fps_in_filename.group(1))
+                if potential_fps > 60:  # Assume it's slow motion if > 60fps
+                    info['real_fps'] = potential_fps
+        
+        return info
+    
+    except Exception as e:
+        print(f"Warning: Could not extract metadata using ffprobe: {e}")
+        return None
+
+def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, output_visualization=True, debug=False, metadata=None):
     # Create output folder with timestamp
     timestamp = int(time.time())
     output_dir = f"shutter_test_{timestamp}"
@@ -22,6 +96,10 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, outpu
     # Parse region of interest
     x1, y1, x2, y2 = roi
     
+    # Get video metadata if not provided
+    if metadata is None:
+        metadata = get_video_metadata(video_path)
+    
     # Open video file
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -29,15 +107,33 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, outpu
         return
     
     # Get video properties
-    fps = cap.get(cv2.CAP_PROP_FPS)
+    container_fps = cap.get(cv2.CAP_PROP_FPS)
     frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
-    # Time per frame in milliseconds
-    ms_per_frame = 1000.0 / fps
+    # Determine the actual FPS to use for calculations
+    fps = container_fps
+    real_fps = None
+    slowmo_factor = 1.0
     
-    print(f"Video FPS: {fps} (each frame is {ms_per_frame:.2f}ms)")
+    if metadata:
+        print(f"Video metadata: {metadata}")
+        if metadata.get('real_fps') is not None:
+            real_fps = metadata['real_fps']
+            slowmo_factor = real_fps / container_fps
+            print(f"Detected slow motion video: {real_fps}fps captured, played at {container_fps}fps")
+            print(f"Slow motion factor: {slowmo_factor:.2f}x")
+    
+    # Time per frame in milliseconds (using container FPS for frame timing)
+    ms_per_frame = 1000.0 / container_fps
+    
+    # Real-world time per frame (adjusted for slow motion if detected)
+    real_ms_per_frame = ms_per_frame / slowmo_factor if slowmo_factor > 1.0 else ms_per_frame
+    
+    print(f"Video container FPS: {container_fps} (each frame is {ms_per_frame:.2f}ms)")
+    if real_fps:
+        print(f"Real capture FPS: {real_fps} (each frame represents {real_ms_per_frame:.2f}ms in real time)")
     print(f"Video resolution: {frame_width}x{frame_height}")
     print(f"ROI: ({x1}, {y1}) to ({x2}, {y2})")
     print(f"Brightness threshold: {threshold}")
@@ -64,6 +160,9 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, outpu
         # Calculate frame timestamp in milliseconds
         frame_time_ms = frame_count * ms_per_frame
         frame_timestamps.append(frame_time_ms)
+        
+        # Also track real-world time if slow motion is detected
+        real_time_ms = frame_count * real_ms_per_frame
         
         # Extract region of interest
         if y2 <= frame.shape[0] and x2 <= frame.shape[1]:
@@ -203,21 +302,39 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, outpu
             for i, event in enumerate(shutter_intervals):
                 report_file.write(f"Event {i+1}:\n")
                 report_file.write(f"  Frames: {event['start_frame']} to {event['end_frame']}\n")
-                report_file.write(f"  Time: {event['start_time_ms']:.2f}ms to {event['end_time_ms']:.2f}ms\n")
-                report_file.write(f"  Duration: {event['duration_ms']:.2f}ms\n")
+                report_file.write(f"  Video time: {event['start_time_ms']:.2f}ms to {event['end_time_ms']:.2f}ms\n")
+                report_file.write(f"  Video duration: {event['duration_ms']:.2f}ms\n")
                 report_file.write(f"  Max brightness: {event['max_brightness']:.1f}\n")
                 
-                # Convert to traditional shutter speed notation (1/x sec)
-                shutter_speed_denominator = int(1000 / event['duration_ms'])
-                report_file.write(f"  Approximate shutter speed: 1/{shutter_speed_denominator} sec\n\n")
+                # If slow motion was detected, calculate real-world duration
+                if real_fps:
+                    real_duration_ms = event['duration_ms'] / slowmo_factor
+                    report_file.write(f"  Real-world duration: {real_duration_ms:.2f}ms\n")
+                    # Convert to traditional shutter speed notation (1/x sec)
+                    shutter_speed_denominator = int(1000 / real_duration_ms)
+                    report_file.write(f"  Approximate shutter speed: 1/{shutter_speed_denominator} sec\n\n")
+                else:
+                    # Convert to traditional shutter speed notation (1/x sec)
+                    shutter_speed_denominator = int(1000 / event['duration_ms'])
+                    report_file.write(f"  Approximate shutter speed: 1/{shutter_speed_denominator} sec\n\n")
             
             # Calculate average shutter duration
             durations = [event['duration_ms'] for event in shutter_intervals]
             avg_duration = np.mean(durations)
             std_duration = np.std(durations)
             
-            report_file.write(f"Average shutter duration: {avg_duration:.2f}ms ± {std_duration:.2f}ms\n")
-            report_file.write(f"Approximate average shutter speed: 1/{int(1000/avg_duration)} sec\n")
+            report_file.write(f"Average shutter duration (video time): {avg_duration:.2f}ms ± {std_duration:.2f}ms\n")
+            
+            if real_fps:
+                # Calculate real-world durations
+                real_durations = [d / slowmo_factor for d in durations]
+                real_avg_duration = np.mean(real_durations)
+                real_std_duration = np.std(real_durations)
+                
+                report_file.write(f"Average shutter duration (real-world): {real_avg_duration:.2f}ms ± {real_std_duration:.2f}ms\n")
+                report_file.write(f"Approximate average shutter speed: 1/{int(1000/real_avg_duration)} sec\n")
+            else:
+                report_file.write(f"Approximate average shutter speed: 1/{int(1000/avg_duration)} sec\n")
         else:
             report_file.write("No shutter events detected. Try adjusting the threshold or ROI.\n")
     
@@ -282,8 +399,15 @@ def main():
                         help='Skip generating visualization plots')
     parser.add_argument('--debug', action='store_true',
                         help='Enable debug mode to save thresholded frames')
+    parser.add_argument('--real-fps', type=float,
+                        help='Specify the real capture FPS for slow motion videos')
     
     args = parser.parse_args()
+    
+    # If real FPS is specified, create a minimal metadata structure
+    metadata = None
+    if args.real_fps:
+        metadata = {'real_fps': args.real_fps}
     
     analyze_shutter(
         args.video_path, 
@@ -291,7 +415,8 @@ def main():
         args.threshold,
         max_duration_seconds=args.max_duration,
         output_visualization=not args.no_plot,
-        debug=args.debug
+        debug=args.debug,
+        metadata=metadata
     )
 
 if __name__ == "__main__":
