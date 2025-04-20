@@ -330,9 +330,9 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
             event_dir = os.path.join(output_dir, f"shutter-event-{i+1:03d}")
             os.makedirs(event_dir, exist_ok=True)
             
-            # Calculate frame range with context (5 frames before and after)
+            # Calculate frame range with context (5 frames before and 10 frames after)
             start_frame_with_context = max(event['start_frame'] - 5, 0)
-            end_frame_with_context = min(event['end_frame'] + 5, total_frames - 1)
+            end_frame_with_context = min(event['end_frame'] + 10, total_frames - 1)
             
             # Set position to start frame with context
             cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame_with_context)
