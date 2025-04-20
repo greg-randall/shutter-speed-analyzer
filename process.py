@@ -210,6 +210,8 @@ def create_visualization_plots(output_dir, timestamps_array, brightness_array,
     return plt_path
 
 
+
+
 def print_video_info(video_path, container_fps, ms_per_frame, real_fps, real_ms_per_frame, 
                     frame_width, frame_height, roi, threshold, white_percentage_threshold,
                     start_time_seconds, end_time_seconds, max_duration_seconds):
