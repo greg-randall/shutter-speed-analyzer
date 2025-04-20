@@ -68,6 +68,19 @@ def get_video_metadata(video_path):
         if 'format' in metadata and 'duration' in metadata['format']:
             info['duration'] = float(metadata['format']['duration'])
         
+        # Check for Android capture FPS in format tags
+        if 'format' in metadata and 'tags' in metadata['format']:
+            format_tags = metadata['format']['tags']
+            if 'com.android.capture.fps' in format_tags:
+                try:
+                    android_fps = float(format_tags['com.android.capture.fps'])
+                    # If this is significantly higher than container FPS, use it as real_fps
+                    if info['container_fps'] is None or android_fps > info['container_fps'] * 1.5:
+                        info['real_fps'] = android_fps
+                        print(f"Found Android capture FPS: {android_fps}")
+                except (ValueError, TypeError):
+                    pass
+        
         # If we couldn't find real_fps in metadata, check if filename contains indicators
         if info['real_fps'] is None:
             # Check filename for common slow motion indicators (like "240fps" or "240p")
