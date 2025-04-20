@@ -432,8 +432,8 @@ def main():
                         help='Region of interest as x1 y1 x2 y2 (top-left and bottom-right coordinates)')
     parser.add_argument('--threshold', type=int, default=100, 
                         help='Brightness threshold (0-255) for converting to binary image')
-    parser.add_argument('--white-percentage', type=float, default=10.0,
-                        help='Percentage of white pixels in ROI to consider as a shutter event (default: 10.0)')
+    parser.add_argument('--white-percentage', type=float, default=0.1,
+                        help='Percentage of white pixels in ROI to consider as a shutter event (default: 0.1)')
     parser.add_argument('--start-time', type=float, 
                         help='Start time in seconds to begin analysis')
     parser.add_argument('--end-time', type=float, 
