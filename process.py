@@ -278,6 +278,23 @@ def analyze_shutter_with_circle_detection(video_path, roi=None, max_time=None, e
                 # For debugging, draw ROI and detected circles
                 x, y, w, h = roi
                 frame = cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                # Draw corner markers
+                corner_length = 20
+                # Top-left corner
+                cv2.line(frame, (x, y), (x + corner_length, y), (0, 255, 0), 3)
+                cv2.line(frame, (x, y), (x, y + corner_length), (0, 255, 0), 3)
+                # Top-right corner
+                cv2.line(frame, (x+w, y), (x+w - corner_length, y), (0, 255, 0), 3)
+                cv2.line(frame, (x+w, y), (x+w, y + corner_length), (0, 255, 0), 3)
+                # Bottom-left corner
+                cv2.line(frame, (x, y+h), (x + corner_length, y+h), (0, 255, 0), 3)
+                cv2.line(frame, (x, y+h), (x, y+h - corner_length), (0, 255, 0), 3)
+                # Bottom-right corner
+                cv2.line(frame, (x+w, y+h), (x+w - corner_length, y+h), (0, 255, 0), 3)
+                cv2.line(frame, (x+w, y+h), (x+w, y+h - corner_length), (0, 255, 0), 3)
+                # Add text labels for the corners
+                cv2.putText(frame, f"({x},{y})", (x+5, y+20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                cv2.putText(frame, f"({x+w},{y+h})", (x+w-80, y+h-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
                 
                 # If a circle was detected in this frame, draw it
                 if frame_idx < len(circle_centers) and circle_centers[frame_idx] is not None:
@@ -304,6 +321,8 @@ def main():
                         help='Stop processing at this timestamp in seconds')
     parser.add_argument('--roi', type=int, nargs=4, metavar=('X', 'Y', 'WIDTH', 'HEIGHT'),
                         help='Region of interest (x, y, width, height)')
+    parser.add_argument('--roi-corners', type=int, nargs=4, metavar=('X1', 'Y1', 'X2', 'Y2'),
+                        help='Region of interest as corners (top-left x, top-left y, bottom-right x, bottom-right y)')
     parser.add_argument('--min-radius', type=int, default=60,
                         help='Minimum circle radius to detect (default: 60)')
     parser.add_argument('--max-radius', type=int, default=75,
@@ -315,7 +334,13 @@ def main():
     args = parser.parse_args()
     
     # Set ROI if provided
-    roi = args.roi if args.roi else None
+    roi = None
+    if args.roi:
+        roi = args.roi
+    elif args.roi_corners:
+        x1, y1, x2, y2 = args.roi_corners
+        # Convert to x, y, width, height format
+        roi = (x1, y1, x2-x1, y2-y1)
     
     # Run analysis
     shutter_events, circle_detected, fps = analyze_shutter_with_circle_detection(
