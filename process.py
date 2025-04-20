@@ -333,7 +333,7 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                     comparison = np.hstack((debug_frame, full_thresholded))
                     
                     # Save the debug frame
-                    debug_path = os.path.join(debug_dir, f"frame_{frame_count:06d}_{frame_time_ms:.1f}ms.jpg")
+                    debug_path = os.path.join(debug_dir, f"frame_{frame_count:06d}_{video_time_ms:.1f}ms.jpg")
                     cv2.imwrite(debug_path, comparison)
             else:
                 print(f"{Fore.RED}Warning: ROI coordinates ({x1}, {y1}, {x2}, {y2}) out of frame bounds ({frame_width}x{frame_height}){Style.RESET_ALL}")
@@ -343,12 +343,12 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
             pbar.update(1)
             
             # Check if we've reached the maximum duration to analyze
-            if max_duration_seconds is not None and frame_time_ms >= max_duration_seconds * 1000:
+            if max_duration_seconds is not None and video_time_ms >= max_duration_seconds * 1000:
                 print(f"\n{Fore.CYAN}Reached maximum analysis duration of {max_duration_seconds} seconds{Style.RESET_ALL}")
                 break
                 
             # Check if we've reached the end time
-            if end_time_seconds is not None and frame_time_ms >= end_time_seconds * 1000:
+            if end_time_seconds is not None and video_time_ms >= end_time_seconds * 1000:
                 print(f"\n{Fore.CYAN}Reached end time of {end_time_seconds} seconds{Style.RESET_ALL}")
                 break
     
