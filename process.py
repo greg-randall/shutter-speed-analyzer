@@ -49,6 +49,8 @@ def create_frame_brightness_map(brightness_values, start_frame):
     Returns:
         Dictionary mapping frame indices to brightness values
     """
+    # This function is kept for backward compatibility but is no longer used
+    # in the single-pass implementation
     return {start_frame + i: value for i, value in enumerate(brightness_values)}
 
 def reliable_frame_seek(cap, target_frame):
