@@ -15,6 +15,19 @@ from tqdm import tqdm
 import colorama
 from colorama import Fore, Style
 
+def create_frame_brightness_map(brightness_values, start_frame):
+    """
+    Create a mapping of frame indices to their brightness values
+    
+    Args:
+        brightness_values: List of brightness values from analysis
+        start_frame: Starting frame index of the analysis
+        
+    Returns:
+        Dictionary mapping frame indices to brightness values
+    """
+    return {start_frame + i: value for i, value in enumerate(brightness_values)}
+
 def reliable_frame_seek(cap, target_frame):
     """
     Reliably seek to a specific frame in a video.
@@ -327,6 +340,9 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
     brightness_array = np.array(brightness_values)
     timestamps_array = np.array(frame_timestamps)
     
+    # Create a mapping of frame indices to brightness values for verification
+    frame_brightness_map = create_frame_brightness_map(brightness_values, start_frame)
+    
     # Find shutter events (frames above white percentage threshold)
     shutter_events = brightness_array > white_percentage_threshold
     shutter_frames = np.where(shutter_events)[0]
@@ -433,8 +449,25 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                             2
                         )
                     
+                        # Verify brightness against stored value from first pass
+                        if frame_idx in frame_brightness_map:
+                            stored_brightness = frame_brightness_map[frame_idx]
+                            if abs(white_percentage - stored_brightness) > 1.0:  # Allow small differences due to rounding
+                                print(f"{Fore.YELLOW}Warning: Frame {frame_idx} brightness mismatch. "
+                                      f"First pass: {stored_brightness:.3f}%, Second pass: {white_percentage:.3f}%{Style.RESET_ALL}")
+                        
                         # Add indicator if this is part of the actual event (not just context)
-                        is_event_frame = event['start_frame'] <= frame_idx <= event['end_frame']
+                        expected_event_frame = event['start_frame'] <= frame_idx <= event['end_frame']
+                        actual_event_frame = white_percentage > white_percentage_threshold
+                        
+                        # Log any discrepancies for debugging
+                        if expected_event_frame != actual_event_frame:
+                            print(f"{Fore.YELLOW}Warning: Frame {frame_idx} index-based classification ({expected_event_frame}) " 
+                                  f"doesn't match brightness-based classification ({actual_event_frame}). "
+                                  f"Brightness: {white_percentage:.3f}%{Style.RESET_ALL}")
+                        
+                        # Use both criteria for more accurate labeling
+                        is_event_frame = expected_event_frame and actual_event_frame
                         
                         if is_event_frame:
                             cv2.putText(
@@ -449,10 +482,24 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                             # Add a red rectangle around the edge of the frame
                             h, w = marked_frame.shape[:2]
                             cv2.rectangle(marked_frame, (0, 0), (w-1, h-1), (0, 0, 255), 3)
+                        # If we're in the expected event range but brightness is too low, mark as a special case
+                        elif expected_event_frame and not actual_event_frame:
+                            cv2.putText(
+                                marked_frame, 
+                                f"EXPECTED EVENT (LOW BRIGHTNESS: {white_percentage:.3f}%)", 
+                                (10, 70), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 
+                                0.8, 
+                                (255, 165, 0),  # Orange color
+                                2
+                            )
+                            # Add an orange rectangle around the edge of the frame
+                            h, w = marked_frame.shape[:2]
+                            cv2.rectangle(marked_frame, (0, 0), (w-1, h-1), (255, 165, 0), 3)
                     
                         # Use a consistent naming pattern that sorts properly but still indicates event vs context
-                        #marker = "e" if is_event_frame else "c"
-                        output_path = os.path.join(event_dir, f"frame_{frame_idx:06d}_{frame_time_ms:.1f}ms.jpg")
+                        marker = "e" if is_event_frame else ("x" if expected_event_frame else "c")
+                        output_path = os.path.join(event_dir, f"frame_{frame_idx:06d}_{marker}_{frame_time_ms:.1f}ms.jpg")
                         cv2.imwrite(output_path, marked_frame)
                     
                     event_pbar.update(1)
