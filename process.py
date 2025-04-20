@@ -488,40 +488,34 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                                   f"doesn't match brightness-based classification ({actual_event_frame}). "
                                   f"Brightness: {white_percentage:.3f}%{Style.RESET_ALL}")
                         
-                        # Use both criteria for more accurate labeling
-                        is_event_frame = expected_event_frame and actual_event_frame
+                        # CRITICAL FIX: Use only the expected_event_frame for classification
+                        # This is more reliable since we've already analyzed the video once
+                        is_event_frame = expected_event_frame
                         
                         if is_event_frame:
+                            # Add brightness info to the event frame label
                             cv2.putText(
                                 marked_frame, 
-                                "SHUTTER EVENT", 
+                                f"SHUTTER EVENT (BRIGHTNESS: {white_percentage:.3f}%)", 
                                 (10, 70), 
                                 cv2.FONT_HERSHEY_SIMPLEX, 
-                                1, 
+                                0.8, 
                                 (0, 0, 255), 
                                 2
                             )
                             # Add a red rectangle around the edge of the frame
                             h, w = marked_frame.shape[:2]
                             cv2.rectangle(marked_frame, (0, 0), (w-1, h-1), (0, 0, 255), 3)
-                        # If we're in the expected event range but brightness is too low, mark as a special case
-                        elif expected_event_frame and not actual_event_frame:
-                            cv2.putText(
-                                marked_frame, 
-                                f"EXPECTED EVENT (LOW BRIGHTNESS: {white_percentage:.3f}%)", 
-                                (10, 70), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 
-                                0.8, 
-                                (255, 165, 0),  # Orange color
-                                2
-                            )
-                            # Add an orange rectangle around the edge of the frame
-                            h, w = marked_frame.shape[:2]
-                            cv2.rectangle(marked_frame, (0, 0), (w-1, h-1), (255, 165, 0), 3)
+                            
+                            # If the brightness doesn't match what we expect, log it but still mark as event
+                            if not actual_event_frame and white_percentage < 0.5:  # Very low brightness
+                                print(f"{Fore.RED}Critical: Frame {frame_idx} is an event frame but has very low brightness: {white_percentage:.3f}%{Style.RESET_ALL}")
                     
                         # Use a consistent naming pattern that sorts properly but still indicates event vs context
-                        marker = "e" if is_event_frame else ("x" if expected_event_frame else "c")
-                        output_path = os.path.join(event_dir, f"frame_{frame_idx:06d}_{marker}_{video_time_ms:.1f}ms.jpg")
+                        # We now prioritize the expected_event_frame from first pass analysis
+                        marker = "e" if is_event_frame else "c"
+                        # Add brightness to filename for easier debugging
+                        output_path = os.path.join(event_dir, f"frame_{frame_idx:06d}_{marker}_{white_percentage:.1f}pct_{video_time_ms:.1f}ms.jpg")
                         cv2.imwrite(output_path, marked_frame)
                     
                     event_pbar.update(1)
