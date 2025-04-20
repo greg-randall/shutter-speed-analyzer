@@ -82,13 +82,13 @@ The tool creates a timestamped output directory containing:
 Check out some of the output in the folder 'sample-output'. The part you really care about though is probably in "shutter_analysis_report.txt", and looks like this:
 
 Event 1:
-  Frames: 1111 to 1122
-  Video time: 37163.59ms to 37531.55ms
-  Video duration: 401.41ms
-  Max brightness: 11.9
-  Event folder: shutter-event-001
-  Real-world duration: 50.00ms
-  Approximate shutter speed: 1/20 sec
+Frames: 1111 to 1122
+Video time: 37163.59ms to 37531.55ms
+Video duration: 401.41ms
+Max brightness: 11.9
+Event folder: shutter-event-001
+Real-world duration: 50.00ms
+Approximate shutter speed: 1/20 sec
 
 ![grid of sample shutter opening/closing](sample-output/grid.jpg)
 
