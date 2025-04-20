@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
+
 def calculate_frame_times(frame_idx, container_fps, slowmo_factor=1.0):
     """
     Calculate consistent frame times in both video time and real-world time.
