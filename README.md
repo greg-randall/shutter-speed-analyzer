@@ -65,6 +65,7 @@ python3 process.py in.mp4 --roi 371 281 877 556 --threshold 44 --white-percentag
 - `--white-percentage VALUE`: Percentage of white pixels required to consider a frame as part of a shutter event
 - `--start-time SECONDS`: Time in seconds to begin analysis
 - `--end-time SECONDS`: Time in seconds to stop analysis
+- `--max-duration SECONDS`: Maximum duration to analyze in seconds (deprecated, use --start-time and --end-time instead)
 - `--real-fps FPS`: Actual capture frame rate for slow-motion videos
 - `--debug`: Enable debug mode to save thresholded frames
 - `--no-plot`: Skip generating visualization plots
@@ -76,8 +77,14 @@ The tool creates a timestamped output directory containing:
 - A text report with detailed analysis results
 - Visualization plots showing brightness over time and event durations
 - Individual folders for each detected shutter event
-- Frame-by-frame images for each event with context frames
+- Frame-by-frame images for each event with context frames before and after the event
 - Debug frames (if debug mode is enabled)
+
+Each frame saved during an event is labeled with:
+- 'c' for context frames (before and after the event)
+- 'e' for event frames (during the shutter event)
+
+The filename includes the frame number, timestamp, and white pixel percentage.
 
 Check out some of the output in the folder 'sample-output'. The part you really care about though is probably in "shutter_analysis_report.txt".
 
@@ -88,9 +95,11 @@ Check out some of the output in the folder 'sample-output'. The part you really 
 1. The tool extracts a region of interest from each video frame
 2. It converts this region to grayscale and applies a threshold
 3. The percentage of white pixels is calculated for each frame
-4. Frames exceeding the white percentage threshold are grouped into events
-5. The duration of each event is calculated and converted to a shutter speed
-6. For slow-motion videos, the tool adjusts calculations based on the real capture FPS
+4. Frames exceeding the white percentage threshold are grouped into events in real-time
+5. Context frames before and after each event are saved for reference
+6. The duration of each event is calculated and converted to a shutter speed
+7. For slow-motion videos, the tool adjusts calculations based on the real capture FPS
+8. A comprehensive report and visualization plots are generated
 
 ## Tips for Best Results
 
