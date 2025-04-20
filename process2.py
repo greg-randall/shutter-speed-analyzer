@@ -3,6 +3,9 @@ import numpy as np
 import os
 import time
 import argparse
+import matplotlib
+# Use Agg backend which doesn't require a display server
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from datetime import datetime
 import subprocess
