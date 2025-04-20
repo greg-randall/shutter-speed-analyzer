@@ -4,7 +4,7 @@ A tool for analyzing camera shutter speeds from video recordings. This utility p
 
 ## Overview
 
-This tool works by analyzing a region of interest (ROI) in a video where a camera's shutter or flash is visible. It detects frames where the brightness exceeds a threshold, groups consecutive bright frames into events, and calculates the duration of each event to determine the shutter speed.
+This tool works by analyzing a region of interest (ROI) in a video where a camera's shutter. It detects frames where the brightness exceeds a threshold, groups consecutive bright frames into events, and calculates the duration of each event to determine the shutter speed.
 
 ## Features
 
@@ -95,7 +95,3 @@ The tool creates a timestamped output directory containing:
 - Use slow-motion video for more accurate measurements
 - Specify the real FPS for slow-motion videos using `--real-fps`
 - Use the debug mode to fine-tune your parameters
-
-## License
-
-MIT License
