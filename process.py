@@ -471,6 +471,10 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                             2
                         )
                     
+                        # Add indicator if this is part of the actual event (not just context)
+                        expected_event_frame = event['start_frame'] <= frame_idx <= event['end_frame']
+                        actual_event_frame = white_percentage > white_percentage_threshold
+                        
                         # Verify brightness against stored value from first pass
                         if frame_idx in frame_brightness_map:
                             stored_brightness = frame_brightness_map[frame_idx]
@@ -500,10 +504,6 @@ def analyze_shutter(video_path, roi, threshold, max_duration_seconds=None, start
                                 else:
                                     print(f"{Fore.YELLOW}Warning: Frame {frame_idx} brightness mismatch. "
                                           f"First pass: {stored_brightness:.3f}%, Second pass: {white_percentage:.3f}%{Style.RESET_ALL}")
-                        
-                        # Add indicator if this is part of the actual event (not just context)
-                        expected_event_frame = event['start_frame'] <= frame_idx <= event['end_frame']
-                        actual_event_frame = white_percentage > white_percentage_threshold
                         
                         # Log any discrepancies for debugging
                         if expected_event_frame != actual_event_frame:
