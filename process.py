@@ -980,30 +980,3 @@ def create_event_visualization(frame, roi, white_percentage, is_event_frame):
     return marked_frame
 
 
-def generate_report(output_dir, video_path, fps, ms_per_frame, frame_count, start_frame, 
-                   roi, threshold, white_percentage_threshold, shutter_intervals,
-                   start_time_seconds, end_time_seconds, max_duration_seconds, 
-                   slowmo_factor=1.0, real_fps=None):
-    """
-    Generate a text report of the analysis results.
-    
-    Args:
-        output_dir: Directory to save the report
-        video_path: Path to the analyzed video
-        fps: Video frame rate
-        ms_per_frame: Milliseconds per frame
-        frame_count: Total frames processed
-        start_frame: Starting frame of analysis
-        roi: Region of interest as (x1, y1, x2, y2)
-        threshold: Brightness threshold
-        white_percentage_threshold: Threshold for considering a frame part of a shutter event
-        shutter_intervals: List of detected shutter events
-        start_time_seconds: Start time of analysis in seconds
-        end_time_seconds: End time of analysis in seconds
-        max_duration_seconds: Maximum duration analyzed in seconds
-        slowmo_factor: Slow motion factor
-        real_fps: Real capture FPS for slow motion videos
-        
-    Returns:
-        Path to the generated report
-    """
