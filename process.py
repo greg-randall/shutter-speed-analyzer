@@ -136,38 +136,70 @@ def analyze_shutter_with_circle_detection(video_path, roi=None, max_time=None, e
         detected = False
         center_x, center_y, radius = None, None, None
         
-        circles = cv2.HoughCircles(
-            processed_img,            # Use the processed image (thresholded or blurred)
-            cv2.HOUGH_GRADIENT, 
-            dp=1,                     # Resolution ratio
-            minDist=100,              # Min distance between circles (large as we expect only one)
-            param1=70,                # Edge detector upper threshold (increased for contrast enhanced image)
-            param2=20,                # Circle detection threshold (reduced to be more sensitive)
-            minRadius=min_radius,     # Min radius based on known diameter (~134px)
-            maxRadius=max_radius      # Max radius
-        )
-        
-        if circles is not None:
-            detected = True
-            # Get the strongest circle match
-            circles = np.uint16(np.around(circles))
-            strongest_circle = circles[0, 0]
-            center_x, center_y, radius = strongest_circle[0], strongest_circle[1], strongest_circle[2]
+        # When using threshold, also check for white area percentage
+        if threshold is not None:
+            # Calculate percentage of white pixels in the thresholded image
+            white_pixel_count = np.sum(processed_img == 255)
+            total_pixels = processed_img.size
+            white_percentage = (white_pixel_count / total_pixels) * 100
             
-            # Debug: Save detected circle visualization
-            if debug and frame_count % 5 == 0:
-                circle_vis = cv2.cvtColor(blurred, cv2.COLOR_GRAY2BGR)
-                cv2.circle(circle_vis, (center_x, center_y), radius, (0, 255, 0), 2)
-                cv2.circle(circle_vis, (center_x, center_y), 2, (0, 0, 255), 3)
-                cv2.putText(circle_vis, f"Frame {frame_count}: Circle r={radius}", (10, h-10), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
-                cv2.imwrite(os.path.join('debug', f'circle_frame_{frame_count:06d}.jpg'), circle_vis)
-        elif debug and frame_count % 5 == 0:
-            # Debug: Save frames where no circle was detected
-            no_circle = cv2.cvtColor(blurred, cv2.COLOR_GRAY2BGR)
-            cv2.putText(no_circle, f"Frame {frame_count}: No Circle Detected", (10, h-10), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-            cv2.imwrite(os.path.join('debug', f'no_circle_frame_{frame_count:06d}.jpg'), no_circle)
+            # If white area exceeds threshold, consider it detected
+            # Adjust this threshold based on your specific use case
+            white_area_threshold = 30  # Consider detected if more than 30% of image is white
+            if white_percentage > white_area_threshold:
+                detected = True
+                # Use center of mass of white pixels as an approximation of circle center
+                y_indices, x_indices = np.where(processed_img == 255)
+                if len(x_indices) > 0 and len(y_indices) > 0:
+                    center_x = int(np.mean(x_indices))
+                    center_y = int(np.mean(y_indices))
+                    # Estimate radius based on area
+                    radius = int(np.sqrt(white_pixel_count / np.pi))
+                    
+                # Debug: Save white area detection visualization
+                if debug and frame_count % 5 == 0:
+                    area_vis = cv2.cvtColor(processed_img, cv2.COLOR_GRAY2BGR)
+                    if center_x is not None and center_y is not None:
+                        cv2.circle(area_vis, (center_x, center_y), 5, (0, 0, 255), -1)  # Mark center
+                        cv2.circle(area_vis, (center_x, center_y), radius, (0, 255, 0), 2)  # Estimated circle
+                    cv2.putText(area_vis, f"Frame {frame_count}: White {white_percentage:.1f}%", 
+                               (10, h-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+                    cv2.imwrite(os.path.join('debug', f'area_frame_{frame_count:06d}.jpg'), area_vis)
+        
+        # Only run HoughCircles if not already detected by white area method
+        if not detected:
+            circles = cv2.HoughCircles(
+                processed_img,            # Use the processed image (thresholded or blurred)
+                cv2.HOUGH_GRADIENT, 
+                dp=1,                     # Resolution ratio
+                minDist=100,              # Min distance between circles (large as we expect only one)
+                param1=70,                # Edge detector upper threshold (increased for contrast enhanced image)
+                param2=20,                # Circle detection threshold (reduced to be more sensitive)
+                minRadius=min_radius,     # Min radius based on known diameter (~134px)
+                maxRadius=max_radius      # Max radius
+            )
+            
+            if circles is not None:
+                detected = True
+                # Get the strongest circle match
+                circles = np.uint16(np.around(circles))
+                strongest_circle = circles[0, 0]
+                center_x, center_y, radius = strongest_circle[0], strongest_circle[1], strongest_circle[2]
+                
+                # Debug: Save detected circle visualization
+                if debug and frame_count % 5 == 0:
+                    circle_vis = cv2.cvtColor(processed_img, cv2.COLOR_GRAY2BGR)
+                    cv2.circle(circle_vis, (center_x, center_y), radius, (0, 255, 0), 2)
+                    cv2.circle(circle_vis, (center_x, center_y), 2, (0, 0, 255), 3)
+                    cv2.putText(circle_vis, f"Frame {frame_count}: Circle r={radius}", (10, h-10), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+                    cv2.imwrite(os.path.join('debug', f'circle_frame_{frame_count:06d}.jpg'), circle_vis)
+            elif debug and frame_count % 5 == 0:
+                # Debug: Save frames where no circle was detected
+                no_circle = cv2.cvtColor(processed_img, cv2.COLOR_GRAY2BGR)
+                cv2.putText(no_circle, f"Frame {frame_count}: No Circle Detected", (10, h-10), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                cv2.imwrite(os.path.join('debug', f'no_circle_frame_{frame_count:06d}.jpg'), no_circle)
             
         circle_detected.append(detected)
         circle_centers.append((center_x, center_y) if detected else None)
