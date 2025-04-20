@@ -84,48 +84,45 @@ def analyze_shutter_with_circle_detection(video_path, roi=None, max_time=None, e
         # Convert to grayscale
         gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
         
-        # Apply contrast enhancement techniques
-        # 1. Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
-        clahe_img = clahe.apply(gray)
-        
-        # 2. Additional contrast stretching
-        # Normalize to 0-255 (full range)
-        norm_img = cv2.normalize(clahe_img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-        
-        # 3. Apply blur to reduce noise
-        blurred = cv2.GaussianBlur(norm_img, (9, 9), 2)
-        
-        # Apply thresholding if specified
+        # Apply different processing based on whether thresholding is used
         if threshold is not None:
-            _, thresholded = cv2.threshold(blurred, threshold, 255, cv2.THRESH_BINARY)
-            # Use the thresholded image for circle detection
-            processed_img = thresholded
+            # For thresholding, we only need basic blur to reduce noise
+            blurred = cv2.GaussianBlur(gray, (9, 9), 2)
+            _, processed_img = cv2.threshold(blurred, threshold, 255, cv2.THRESH_BINARY)
         else:
-            # Use the blurred image if no threshold specified
-            processed_img = blurred
+            # Apply full contrast enhancement pipeline when not using threshold
+            # 1. Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+            clahe_img = clahe.apply(gray)
+            
+            # 2. Additional contrast stretching
+            # Normalize to 0-255 (full range)
+            norm_img = cv2.normalize(clahe_img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+            
+            # 3. Apply blur to reduce noise
+            processed_img = cv2.GaussianBlur(norm_img, (9, 9), 2)
         
         # Debug: Save processing steps
         if debug and frame_count % 5 == 0:  # Save every 5th frame to reduce disk usage
             if threshold is not None:
-                # Create a larger debug frame to include thresholded image
+                # Create a debug frame for thresholded workflow
                 debug_frame = np.zeros((h*2, w*2), dtype=np.uint8)
                 debug_frame[0:h, 0:w] = gray
-                debug_frame[0:h, w:w*2] = clahe_img
-                debug_frame[h:h*2, 0:w] = norm_img
-                debug_frame[h:h*2, w:w*2] = thresholded  # Show thresholded instead of blurred
+                debug_frame[0:h, w:w*2] = blurred
+                debug_frame[h:h*2, 0:w] = processed_img  # Show thresholded image
+                debug_frame[h:h*2, w:w*2] = processed_img  # Duplicate for consistency
                 
                 # Add labels
                 cv2.putText(debug_frame, "Original Gray", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
-                cv2.putText(debug_frame, "CLAHE", (w+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
-                cv2.putText(debug_frame, "Normalized", (10, h+20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
+                cv2.putText(debug_frame, "Blurred", (w+10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
+                cv2.putText(debug_frame, "Thresholded", (10, h+20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
                 cv2.putText(debug_frame, "Thresholded", (w+10, h+20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
             else:
-                # Original debug frame without thresholding
+                # Original debug frame with full enhancement pipeline
                 debug_frame = np.zeros((h*2, w*2), dtype=np.uint8)
                 debug_frame[0:h, 0:w] = gray
                 debug_frame[0:h, w:w*2] = clahe_img
                 debug_frame[h:h*2, 0:w] = norm_img
-                debug_frame[h:h*2, w:w*2] = blurred
+                debug_frame[h:h*2, w:w*2] = processed_img
                 
                 # Add labels
                 cv2.putText(debug_frame, "Original Gray", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
